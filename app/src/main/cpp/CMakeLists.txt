@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.22)
+project(tvaudio C)
+set(SHAIRPLAY ${CMAKE_CURRENT_SOURCE_DIR}/shairplay)
+set(LIB ${SHAIRPLAY}/lib)
+set(SOURCES base64.c digest.c http_parser.c http_request.c http_response.c httpd.c
+    logger.c netutils.c raop.c raop_buffer.c raop_rtp.c rsakey.c rsapem.c sdp.c
+    aes_ctr.c pairing.c utils.c fairplay_dummy.c plist.c)
+list(TRANSFORM SOURCES PREPEND "${LIB}/")
+file(GLOB CRYPTO ${LIB}/crypto/*.c ${LIB}/alac/*.c ${LIB}/ed25519/*.c)
+# Keep LGPL code in a separate, replaceable shared library.
+add_library(shairplay SHARED ${SOURCES} ${CRYPTO} ${LIB}/curve25519/curve25519-donna.c)
+target_include_directories(shairplay PUBLIC ${SHAIRPLAY}/include/shairplay PRIVATE ${LIB})
+target_link_libraries(shairplay m)
+if(ANDROID)
+    target_compile_options(shairplay PRIVATE -Wno-error=implicit-function-declaration)
+    add_library(tvaudio SHARED raop_jni.c)
+    target_link_libraries(tvaudio shairplay log)
+else()
+    target_link_libraries(shairplay pthread)
+endif()
