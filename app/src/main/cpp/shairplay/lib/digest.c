@@ -58,23 +58,22 @@ digest_get_response(const char *username, const char *realm,
 	digest_md5_to_hex(md5buf, response);
 }
 
-void
+/* Android TV adaptation: replace timestamp-derived nonces with OS randomness. */
+int
 digest_generate_nonce(char *result, int resultlen)
 {
-	MD5_CTX md5ctx;
-	unsigned char md5buf[MD5_SIZE];
-	char md5hex[MD5_SIZE*2];
-	unsigned int time;
-
-	SYSTEM_GET_TIME(time);
-
-	MD5_Init(&md5ctx);
-	MD5_Update(&md5ctx, (unsigned char *)&time, sizeof(time));
-	MD5_Final(md5buf, &md5ctx);
-	digest_md5_to_hex(md5buf, md5hex);
-
+	unsigned char random_bytes[MD5_SIZE];
+	FILE *random;
+	size_t count;
+	if (resultlen < MD5_SIZE*2+1) return 0;
 	memset(result, 0, resultlen);
-	strncpy(result, md5hex, resultlen-1);
+	random = fopen("/dev/urandom", "rb");
+	if (!random) return 0;
+	count = fread(random_bytes, 1, sizeof(random_bytes), random);
+	fclose(random);
+	if (count != sizeof(random_bytes)) return 0;
+	digest_md5_to_hex(random_bytes, result);
+	return 1;
 }
 
 int
@@ -97,7 +96,7 @@ digest_is_valid(const char *our_realm, const char *password,
 	/* Buffer for our response */
 	char our_response[MD5_SIZE*2+1];
 
-	if (!authorization) {
+	if (!authorization || strncmp(authorization, "Digest ", 7)) {
 		return 0;
 	}
 	current = auth = strdup(authorization);
@@ -114,6 +113,8 @@ digest_is_valid(const char *our_realm, const char *password,
 
 	while ((value = utils_strsep(&current, ",")) != NULL) {
 		char *first, *last;
+		/* Android TV adaptation: avoid reading before an empty parameter. */
+		if (!*value) continue;
 
 		/* Find first and last characters */
 		first = value;
@@ -154,7 +155,14 @@ digest_is_valid(const char *our_realm, const char *password,
 	memset(our_response, 0, sizeof(our_response));
 	digest_get_response(username, realm, password, nonce,
 	                    method, uri, our_response);
-	success = !strcmp(response, our_response);
+	/* Android TV adaptation: fixed-size digest comparison. */
+	success = 0;
+	if (strlen(response) == MD5_SIZE*2) {
+		unsigned char difference = 0;
+		int i;
+		for (i = 0; i < MD5_SIZE*2; i++) difference |= (unsigned char)(response[i] ^ our_response[i]);
+		success = difference == 0;
+	}
 	free(auth);
 
 	return success;

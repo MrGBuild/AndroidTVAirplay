@@ -38,9 +38,31 @@ connect to it. Legacy RAOP audio is a separate receiver from direct media URLs.
   and no media-URL logging.
 - Receiver and playback stop when the app leaves the foreground.
 
-Use only on a trusted local network. This prototype has no pairing or password;
-other devices that can reach TCP 7000 can control playback and supply media URLs.
-Do not expose the port to the Internet.
+## Receiver password (version 0.2.0)
+
+On first launch, choose and confirm a password on the TV. Both network receivers
+stay closed until a password has been saved. There is no default password and no
+password-free mode. Use 8–64 letters, numbers or symbols without spaces; a long,
+unique password is recommended. Compatible senders prompt for it when connecting.
+
+**Set / change password** on the TV changes the password and disconnects existing
+senders. Previously queued remote commands are discarded. You do not need to know
+the old password to reset it using the TV's physical remote. Local **Open media URL**
+playback remains available even before setting a receiver password.
+
+The password is stored on the TV using AES-GCM encryption with an Android Keystore
+key. It is not stored in source code, advertised via discovery, logged, or sent to
+an app backend. If it cannot be loaded, the network receivers stay closed.
+
+This is **legacy AirPlay Digest MD5 password authentication**, not modern Apple
+device pairing or a rotating on-screen PIN. Discovery stays visible, but playback
+control and status endpoints require authentication. Each connection uses a fresh
+random nonce. Discovery advertises that a password is required for audio and video.
+Legacy authentication still needs testing with real iPhone senders.
+
+Continue to use a trusted LAN; legacy Digest can allow offline password guessing
+from captured exchanges. Password protection does not encrypt HTTP media URLs or
+replace HTTPS. Do not expose the receiver ports to the Internet.
 
 ## Build
 
@@ -69,7 +91,7 @@ directly, without creating a worktree.
 1. Enable developer options and USB/network debugging on your TV. Use `adb` to
    connect using your device manufacturer's instructions.
 2. Install: `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
-3. Open **TV AirPlay** from the TV launcher. Keep the TV and sender on the same
+3. Open **TV AirPlay** from the TV launcher and set a receiver password. Keep the TV and sender on the same
    trusted network. Guest Wi-Fi/client isolation can prevent discovery.
 4. Select **Open media URL**, enter a direct video/audio URL, and select **Play**.
    The remote controls playback; Back stops playback and returns to the receiver.
@@ -78,27 +100,32 @@ directly, without creating a worktree.
 
 ```sh
 curl http://TV_IP:7000/server-info
-curl -X POST http://TV_IP:7000/play \
+curl --digest --user AirPlay -X POST http://TV_IP:7000/play \
   -H 'Content-Type: text/parameters' \
   --data-binary 'Content-Location: https://example.com/video.mp4'
-curl -X POST 'http://TV_IP:7000/rate?value=0'
-curl -X POST 'http://TV_IP:7000/rate?value=1'
-curl http://TV_IP:7000/playback-info
-curl -X POST http://TV_IP:7000/stop
+curl --digest --user AirPlay -X POST 'http://TV_IP:7000/rate?value=0'
+curl --digest --user AirPlay -X POST 'http://TV_IP:7000/rate?value=1'
+curl --digest --user AirPlay http://TV_IP:7000/playback-info
+curl --digest --user AirPlay -X POST http://TV_IP:7000/stop
 ```
 
 The example.com media path is a placeholder; it is not a playable sample.
+`curl --user AirPlay` prompts for the receiver password without putting it into
+the command line. `/server-info` is the only unauthenticated video endpoint.
 
 ## Validation and next milestones
 
 The JVM tests exercise real TCP connections, binary/text media requests, playback
-controls/state, invalid inputs and unsupported operations. They do not verify
+controls/state, invalid inputs, missing/incorrect/correct passwords, method/URL
+binding, cross-connection replay rejection and unsupported operations. They do not verify
 Android media decoding, multicast discovery, or interoperability with Apple devices.
 An APK build and lint also do not prove these behaviors work on a TV.
 
 The native smoke test exercises a real RTSP session, RSA challenge response,
 RSA-encrypted session key, AES-encrypted UDP ALAC audio, exact PCM sample output,
-volume control and teardown. To run on Linux with CMake, a C compiler, Python 3
+volume control and teardown in baseline and password-protected sessions. The
+protected session also verifies that missing/incorrect credentials cannot start,
+change or stop playback. To run on Linux with CMake, a C compiler, Python 3
 and OpenSSL:
 
 ```sh
@@ -120,3 +147,5 @@ Corresponding source and build instructions are included. Its ALAC, crypto and
 curve implementations retain their upstream notices. The FairPlay extension is
 not included or compiled. License notices and texts are bundled in the APK and
 accessible through **Open-source licenses** on the receiver screen.
+Password adaptations to upstream Digest nonce generation/validation are documented
+in `app/src/main/cpp/shairplay/UPSTREAM.md` and marked in the modified source files.

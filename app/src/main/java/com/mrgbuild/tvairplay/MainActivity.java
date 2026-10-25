@@ -28,7 +28,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     private ExoPlayer player;
     private PlayerView playerView;
     private LinearLayout home;
-    private TextView status, endpoint, playbackStatus, audioStatus;
+    private TextView status, endpoint, playbackStatus, audioStatus, passwordStatus;
     private Button openButton;
     private AirPlayServer receiver;
     private NsdManager nsd;
@@ -36,7 +36,10 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     private NsdManager.RegistrationListener audioRegistration;
     private NativeRaop audioReceiver;
     private String deviceId;
+    private String receiverPassword;
+    private android.app.AlertDialog passwordDialog;
     private int audioGeneration;
+    private volatile int receiverGeneration;
     private volatile AirPlayServer.State state = new AirPlayServer.State(0, 0, false, false);
     private double startFraction;
     private boolean active;
@@ -76,6 +79,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         status = label("Starting receiver…", 21, MINT); add(status, 24);
         endpoint = label("", 15, 0xFFB7C9D6); add(endpoint, 6);
         audioStatus = label("Starting legacy audio receiver…", 15, MINT); add(audioStatus, 6);
+        passwordStatus = label("A receiver password is required", 15, MINT); add(passwordStatus, 6);
         add(label("Experimental legacy video and audio. AirPlay 2, screen mirroring and protected streaming services are not supported. iPhone compatibility needs testing.", 15, 0xFFB7C9D6), 16);
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -90,6 +94,8 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         Button stop = button("Stop"); stop.setOnClickListener(v -> stop());
         LinearLayout.LayoutParams gap2 = new LinearLayout.LayoutParams(-2, -2); gap2.leftMargin = dp(12);
         actions.addView(stop, gap2); add(actions, 20);
+        Button password = button("Set / change password");
+        password.setOnClickListener(v -> showPasswordDialog()); add(password, 10);
         Button licenses = button("Open-source licenses");
         licenses.setOnClickListener(v -> showLicenses()); add(licenses, 10);
         playbackStatus = label("Try a direct MP4, HLS or audio URL to test playback.", 14, 0xFFB7C9D6); add(playbackStatus, 12);
@@ -152,6 +158,42 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         ScrollView scroll = new ScrollView(this); scroll.addView(content);
         new android.app.AlertDialog.Builder(this).setTitle("Open-source licenses").setView(scroll).setPositiveButton("Close", null).show();
     }
+    private void showPasswordDialog() {
+        if (passwordDialog != null && passwordDialog.isShowing()) return;
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(24), dp(8), dp(24), dp(8));
+        form.addView(label("Choose 8–64 letters, numbers or symbols without spaces. Enter this password on your sender when prompted. Changing it disconnects existing senders.", 15, Color.WHITE));
+        EditText password = new EditText(this); password.setSingleLine(true); password.setHint("New receiver password");
+        EditText confirm = new EditText(this); confirm.setSingleLine(true); confirm.setHint("Confirm password");
+        int inputType = android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;
+        password.setInputType(inputType); confirm.setInputType(inputType);
+        password.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)});
+        confirm.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)});
+        form.addView(password); form.addView(confirm);
+        CheckBox visible = new CheckBox(this); visible.setText("Show password");
+        visible.setOnCheckedChangeListener((v, checked) -> {
+            android.text.method.TransformationMethod transformation = checked ? null : android.text.method.PasswordTransformationMethod.getInstance();
+            password.setTransformationMethod(transformation); confirm.setTransformationMethod(transformation);
+        }); form.addView(visible);
+        passwordDialog = new android.app.AlertDialog.Builder(this).setTitle("Receiver password").setView(form)
+                .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create();
+        passwordDialog.setOnShowListener(d -> passwordDialog.getButton(-1).setOnClickListener(v -> {
+            String value = password.getText().toString();
+            try { PasswordStore.validate(value); }
+            catch (IllegalArgumentException e) { password.setError(e.getMessage()); return; }
+            if (!value.equals(confirm.getText().toString())) { confirm.setError("Passwords do not match"); return; }
+            try { new PasswordStore(this).save(value); }
+            catch (java.security.GeneralSecurityException | java.io.IOException | RuntimeException e) {
+                password.setError("Password could not be saved securely. Existing protection has not been disabled."); return;
+            }
+            stopNetworkReceivers(); player.stop(); player.clearMediaItems(); startFraction = 0;
+            state = new AirPlayServer.State(0, 0, false, false);
+            receiverPassword = value;
+            if (active) startReceivers();
+            passwordDialog.dismiss(); showHome("Password saved. Senders must authenticate before controlling playback.");
+        }));
+        passwordDialog.show();
+    }
     @Override protected void onStart() {
         super.onStart(); active = true; main.post(refresh);
         String id = getPreferences(0).getString("deviceId", null);
@@ -163,13 +205,40 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         }
         deviceId = id;
         nsd = (NsdManager)getSystemService(NSD_SERVICE);
+        try { receiverPassword = new PasswordStore(this).load(); }
+        catch (java.security.GeneralSecurityException | java.io.IOException | RuntimeException e) {
+            receiverPassword = null;
+            passwordStatus.setText("Saved password could not be unlocked. Set a new password to enable connections.");
+        }
+        if (receiverPassword == null) {
+            status.setText("Connections locked • set a receiver password");
+            audioStatus.setText("Audio receiver locked"); endpoint.setText("No network receiver is listening");
+            showPasswordDialog(); return;
+        }
+        startReceivers();
+    }
+    private void startReceivers() {
+        if (!active || receiverPassword == null) return;
+        passwordStatus.setText("Password protection is on • applies to audio and video controls");
+        final int generation = ++receiverGeneration;
         try {
-            receiver = new AirPlayServer(7000, id, this); receiver.start();
+            receiver = new AirPlayServer(7000, deviceId, receiverPassword, new AirPlayServer.Playback() {
+                private void dispatch(Runnable command) {
+                    main.post(() -> { if (active && receiverGeneration == generation) command.run(); });
+                }
+                public void play(String url, double fraction) { dispatch(() -> MainActivity.this.play(url, fraction)); }
+                public void pause(boolean paused) { dispatch(() -> MainActivity.this.pause(paused)); }
+                public void seek(double seconds) { dispatch(() -> MainActivity.this.seek(seconds)); }
+                public void stop() { dispatch(() -> MainActivity.this.stop()); }
+                public AirPlayServer.State state() {
+                    return receiverGeneration == generation ? MainActivity.this.state() : new AirPlayServer.State(0, 0, false, false);
+                }
+            }); receiver.start();
             endpoint.setText("Receiver address: " + addresses() + "  •  Port " + receiver.port());
             nsd = (NsdManager)getSystemService(NSD_SERVICE);
             NsdServiceInfo info = new NsdServiceInfo();
             info.setServiceName("TV AirPlay (Legacy)"); info.setServiceType("_airplay._tcp."); info.setPort(receiver.port());
-            info.setAttribute("deviceid", id); info.setAttribute("features", "0x1");
+            info.setAttribute("deviceid", deviceId); info.setAttribute("features", "0x1"); info.setAttribute("pw", "true");
             info.setAttribute("model", "AppleTV2,1"); info.setAttribute("srcvers", "130.14");
             info.setAttribute("flags", "0x4"); info.setAttribute("vv", "1");
             registration = new NsdManager.RegistrationListener() {
@@ -187,11 +256,11 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         startAudioReceiver();
         if (audioReceiver != null) {
             NsdServiceInfo info = new NsdServiceInfo();
-            info.setServiceName(id.replace(":", "") + "@TV AirPlay Audio");
+            info.setServiceName(deviceId.replace(":", "") + "@TV AirPlay Audio");
             info.setServiceType("_raop._tcp."); info.setPort(audioReceiver.port());
             info.setAttribute("txtvers", "1"); info.setAttribute("ch", "2"); info.setAttribute("cn", "1");
             info.setAttribute("et", "1"); info.setAttribute("sv", "false"); info.setAttribute("da", "true");
-            info.setAttribute("sr", "44100"); info.setAttribute("ss", "16"); info.setAttribute("pw", "false");
+            info.setAttribute("sr", "44100"); info.setAttribute("ss", "16"); info.setAttribute("pw", "true");
             info.setAttribute("vn", "3"); info.setAttribute("tp", "TCP,UDP"); info.setAttribute("vs", "130.14");
             info.setAttribute("sm", "false"); info.setAttribute("ek", "1");
             audioRegistration = new NsdManager.RegistrationListener() {
@@ -208,8 +277,9 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     private void startAudioReceiver() {
         int generation = ++audioGeneration;
         if (audioReceiver != null) { audioReceiver.close(); audioReceiver = null; }
+        if (!active || receiverPassword == null) return;
         try {
-            audioReceiver = new NativeRaop(this, deviceId, (playing, message) -> runOnUiThread(() -> {
+            audioReceiver = new NativeRaop(this, deviceId, receiverPassword, (playing, message) -> runOnUiThread(() -> {
                 if (!active || audioGeneration != generation) return;
                 if (playing) { player.stop(); player.clearMediaItems(); startFraction = 0; showHome(message); }
                 audioStatus.setText(message);
@@ -256,6 +326,15 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     }
     @Override protected void onStop() {
         active = false; main.removeCallbacks(refresh);
+        stopNetworkReceivers();
+        receiverPassword = null;
+        player.stop(); player.clearMediaItems(); startFraction = 0;
+        state = new AirPlayServer.State(0, 0, false, false);
+        showHome("Receiver stopped while app is in the background");
+        super.onStop();
+    }
+    private void stopNetworkReceivers() {
+        ++receiverGeneration;
         ++audioGeneration;
         if (audioRegistration != null && nsd != null) {
             try { nsd.unregisterService(audioRegistration); } catch (IllegalArgumentException ignored) { }
@@ -267,11 +346,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
             registration = null;
         }
         if (receiver != null) { receiver.close(); receiver = null; }
-        player.stop(); player.clearMediaItems(); startFraction = 0;
-        state = new AirPlayServer.State(0, 0, false, false);
-        showHome("Receiver stopped while app is in the background");
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        super.onStop();
     }
     @Override protected void onDestroy() { playerView.setPlayer(null); player.release(); super.onDestroy(); }
 }

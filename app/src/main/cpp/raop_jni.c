@@ -66,8 +66,9 @@ static void audio_volume(void *cls, void *session, float volume) {
     if (!env) return;
     (*env)->CallVoidMethod(env, session, r->volume, volume); finished(r, env, attached);
 }
-JNIEXPORT jlong JNICALL Java_com_mrgbuild_tvairplay_NativeRaop_startNative(JNIEnv *env, jobject owner, jbyteArray hw, jstring pem) {
+JNIEXPORT jlong JNICALL Java_com_mrgbuild_tvairplay_NativeRaop_startNative(JNIEnv *env, jobject owner, jbyteArray hw, jstring pem, jstring password) {
     if ((*env)->GetArrayLength(env, hw) != 6) return 0;
+    if (!password || (*env)->GetStringUTFLength(env, password) < 8 || (*env)->GetStringUTFLength(env, password) > 64) return 0;
     receiver_t *r = calloc(1, sizeof(*r)); if (!r) return 0;
     (*env)->GetJavaVM(env, &r->vm); r->owner = (*env)->NewGlobalRef(env, owner);
     jclass cls = (*env)->GetObjectClass(env, owner);
@@ -92,7 +93,11 @@ JNIEXPORT jlong JNICALL Java_com_mrgbuild_tvairplay_NativeRaop_startNative(JNIEn
     raop_set_log_level(r->raop, RAOP_LOG_EMERG);
     char bytes[6]; (*env)->GetByteArrayRegion(env, hw, 0, 6, (jbyte *)bytes);
     r->port = 5000;
-    if (raop_start(r->raop, &r->port, bytes, 6, NULL) < 0) goto fail;
+    const char *secret = (*env)->GetStringUTFChars(env, password, NULL);
+    if (!secret) goto fail;
+    int started = raop_start(r->raop, &r->port, bytes, 6, secret);
+    (*env)->ReleaseStringUTFChars(env, password, secret);
+    if (started < 0) goto fail;
     return (jlong)(intptr_t)r;
 fail:
     if (r->raop) raop_destroy(r->raop);

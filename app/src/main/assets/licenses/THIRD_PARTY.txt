@@ -8,6 +8,11 @@ The library is dynamically linked and can be rebuilt/replaced in a locally
 rebuilt APK. Reverse engineering for debugging modifications to the LGPL
 library is permitted. See bundled LGPL-2.1 and GPL-2 license texts.
 
+Android TV adaptations modify lib/digest.c, lib/digest.h and lib/raop.c for
+cryptographically random authentication nonces, fail-closed nonce generation,
+safe parsing of empty authorization fields, and fixed-size digest comparison.
+Changes are marked in source and documented in shairplay/UPSTREAM.md.
+
 The airport.key asset is the public, upstream AirPort emulation protocol key,
 not a user credential. It is included unchanged from the above commit.
 

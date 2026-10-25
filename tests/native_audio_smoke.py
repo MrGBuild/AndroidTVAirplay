@@ -7,6 +7,7 @@ This does not exercise Android JNI, AudioTrack, discovery or Apple interoperabil
 """
 import base64
 import ctypes as C
+import hashlib
 from pathlib import Path
 import re
 import socket
@@ -16,7 +17,7 @@ import sys
 import threading
 
 
-def main():
+def main(password=None):
     root = Path(__file__).resolve().parents[1]
     library = C.CDLL(sys.argv[1])
     init_t = C.CFUNCTYPE(C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int)
@@ -65,18 +66,26 @@ def main():
     assert raop, "native receiver initialization failed"
     library.raop_set_log_level(raop, 0)
     try:
-        assert library.raop_start(raop, C.byref(port), bytes.fromhex("021122334455"), 6, None) >= 0
+        assert library.raop_start(raop, C.byref(port), bytes.fromhex("021122334455"), 6, password.encode() if password else None) >= 0
         with socket.create_connection(("127.0.0.1", port.value), timeout=3) as connection:
             stream = connection.makefile("rb")
             seq = 0
+            auth_nonce = None
 
-            def rtsp(method, body=b"", extra=""):
-                nonlocal seq
+            def rtsp(method, body=b"", extra="", expected=200, authenticate=True, secret=None):
+                nonlocal seq, auth_nonce
                 seq += 1
+                if authenticate and auth_nonce:
+                    md5 = lambda value: hashlib.md5(value.encode()).hexdigest()
+                    ha1 = md5("AirPlay:airplay:" + (password if secret is None else secret))
+                    uri = "rtsp://127.0.0.1/stream"
+                    response = md5(ha1 + ":" + auth_nonce + ":" + md5(method + ":" + uri))
+                    extra += (f'Authorization: Digest username="AirPlay", realm="airplay", nonce="{auth_nonce}", '
+                              f'uri="{uri}", response="{response}"\r\n')
                 connection.sendall((f"{method} rtsp://127.0.0.1/stream RTSP/1.0\r\nCSeq: {seq}\r\n"
                                     f"Content-Length: {len(body)}\r\n{extra}\r\n").encode() + body)
                 status = stream.readline().decode()
-                assert "200 OK" in status, status
+                assert f" {expected} " in status, status
                 headers = {}
                 while True:
                     line = stream.readline()
@@ -88,6 +97,10 @@ def main():
                 length = int(headers.get("content-length", "0"))
                 if length:
                     assert len(stream.read(length)) == length
+                if expected == 401:
+                    match = re.search(r'nonce="([^"]+)"', headers.get("www-authenticate", ""))
+                    assert match, "missing password challenge"
+                    auth_nonce = match.group(1)
                 return headers
 
             challenge = base64.b64encode(bytes(range(16))).decode()
@@ -103,6 +116,13 @@ def main():
                    "a=fmtp:96 352 0 16 40 10 14 2 255 0 0 44100\r\n"
                    f"a=rsaaeskey:{base64.b64encode(encrypted_key).decode()}\r\n"
                    f"a=aesiv:{base64.b64encode(iv).decode()}\r\n").encode()
+            if password:
+                rtsp("ANNOUNCE", sdp, "Content-Type: application/sdp\r\n", expected=401, authenticate=False)
+                rtsp("ANNOUNCE", sdp, "Content-Type: application/sdp\r\n", expected=401, secret="incorrect-password")
+                rtsp("SETUP", extra="Transport: RTP/AVP/UDP;unicast;mode=record\r\n", expected=401, authenticate=False)
+                rtsp("RECORD", expected=401, authenticate=False)
+                rtsp("ANNOUNCE", sdp, "Content-Type: application/sdp\r\nAuthorization: Digest ,\r\n", expected=401, authenticate=False)
+                assert not formats and not frames, "unauthorized sender reached audio output"
             rtsp("ANNOUNCE", sdp, "Content-Type: application/sdp\r\n")
             setup = rtsp("SETUP", extra="Transport: RTP/AVP/UDP;unicast;mode=record;control_port=0;timing_port=0\r\n")
             audio_port = int(re.search(r"server_port=(\d+)", setup["transport"]).group(1))
@@ -121,14 +141,26 @@ def main():
             assert received.wait(3), "no decoded PCM callback"
             assert formats == [(16, 2, 44100)], formats
             assert frames[0] == struct.pack("<hh", 1234, -1234) * 352, "decoded samples differ"
+            if password:
+                rtsp("SET_PARAMETER", b"volume: -12.0\r\n", "Content-Type: text/parameters\r\n", expected=401, authenticate=False)
+                rtsp("TEARDOWN", expected=401, authenticate=False)
+                assert not volume_changed.is_set() and not destroyed.is_set(), "unauthorized sender changed playback"
             rtsp("SET_PARAMETER", b"volume: -12.0\r\n", "Content-Type: text/parameters\r\n")
             assert volume_changed.wait(3) and volumes[-1] == -12, "volume callback missing"
             rtsp("TEARDOWN", extra="Session: DEADBEEF\r\n")
             assert destroyed.wait(3), "audio teardown callback missing"
-        print("PASS: RTSP, RSA challenge, encrypted ALAC -> 352 exact stereo PCM samples, volume, teardown")
+        # Nonces must differ even for connections arriving within the same clock tick.
+        library.digest_generate_nonce.argtypes = [C.c_void_p, C.c_int]
+        one, two = C.create_string_buffer(33), C.create_string_buffer(33)
+        assert library.digest_generate_nonce(one, 33) == 1
+        assert library.digest_generate_nonce(two, 33) == 1
+        assert one.value != two.value and len(one.value) == 32
+        label = "password-protected" if password else "baseline"
+        print(f"PASS ({label}): RTSP, RSA challenge, encrypted ALAC -> 352 exact stereo PCM samples, volume, teardown, random nonces")
     finally:
         library.raop_destroy(raop)
 
 
 if __name__ == "__main__":
     main()
+    main("native-test-password-123")

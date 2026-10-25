@@ -11,7 +11,8 @@ public final class NativeRaop implements AutoCloseable {
     public interface Listener { void onAudioState(boolean playing, String message); }
     private final Listener listener;
     private long handle;
-    public NativeRaop(Context context, String deviceId, Listener listener) throws IOException {
+    public NativeRaop(Context context, String deviceId, String password, Listener listener) throws IOException {
+        PasswordStore.validate(password);
         this.listener = listener;
         ByteArrayOutputStream data = new ByteArrayOutputStream();
         try (InputStream input = context.getAssets().open("airport.key")) {
@@ -20,12 +21,12 @@ public final class NativeRaop implements AutoCloseable {
         }
         String[] parts = deviceId.split(":"); byte[] address = new byte[6];
         for (int i = 0; i < 6; i++) address[i] = (byte)Integer.parseInt(parts[i], 16);
-        handle = startNative(address, new String(data.toByteArray(), StandardCharsets.US_ASCII));
+        handle = startNative(address, new String(data.toByteArray(), StandardCharsets.US_ASCII), password);
         if (handle == 0) throw new IOException("RAOP listener could not start");
     }
     public int port() { return portNative(handle); }
     @Override public void close() { if (handle != 0) { stopNative(handle); handle = 0; } }
-    private native long startNative(byte[] address, String pem);
+    private native long startNative(byte[] address, String pem, String password);
     private native int portNative(long handle);
     private native void stopNative(long handle);
     @SuppressWarnings("unused") // JNI entry point

@@ -91,6 +91,11 @@ conn_init(void *opaque, unsigned char *local, int locallen, unsigned char *remot
 	if (!conn) {
 		return NULL;
 	}
+	/* Android TV adaptation: refuse a connection without a secure auth nonce. */
+	if (!digest_generate_nonce(conn->nonce, sizeof(conn->nonce))) {
+		free(conn);
+		return NULL;
+	}
 	conn->raop = raop;
 	conn->raop_rtp = NULL;
 	conn->fairplay = fairplay_init(raop->logger);
@@ -137,7 +142,6 @@ conn_init(void *opaque, unsigned char *local, int locallen, unsigned char *remot
 	conn->locallen = locallen;
 	conn->remotelen = remotelen;
 
-	digest_generate_nonce(conn->nonce, sizeof(conn->nonce));
 	return conn;
 }
 

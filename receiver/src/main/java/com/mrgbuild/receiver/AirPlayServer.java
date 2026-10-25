@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** Experimental, unauthenticated legacy media-URL receiver. No RAOP or AirPlay 2. */
+/** Experimental password-protected legacy media-URL receiver. No AirPlay 2. */
 public final class AirPlayServer implements AutoCloseable {
     public interface Playback {
         void play(String url, double startFraction);
@@ -30,14 +30,17 @@ public final class AirPlayServer implements AutoCloseable {
     private static final int MAX_BODY = 65536;
     private final Playback playback;
     private final String deviceId;
+    private final String password;
     private final ServerSocket server;
     private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
     private final ThreadPoolExecutor clients = new ThreadPoolExecutor(2, 4, 30, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(8), r -> { Thread t = new Thread(r, "airplay-client"); t.setDaemon(true); return t; });
     private volatile boolean running;
 
-    public AirPlayServer(int port, String deviceId, Playback playback) throws IOException {
+    public AirPlayServer(int port, String deviceId, String password, Playback playback) throws IOException {
+        if (password == null || password.isEmpty()) throw new IllegalArgumentException("A receiver password is required");
         this.playback = playback; this.deviceId = deviceId;
+        this.password = password;
         server = new ServerSocket();
         server.setReuseAddress(true);
         server.bind(new InetSocketAddress(port));
@@ -63,6 +66,7 @@ public final class AirPlayServer implements AutoCloseable {
         try (Socket s = socket) {
             InputStream in = new BufferedInputStream(s.getInputStream());
             OutputStream out = s.getOutputStream();
+            DigestAuth auth = new DigestAuth(password);
             while (running) {
                 String request = line(in);
                 if (request == null) return;
@@ -99,6 +103,14 @@ public final class AirPlayServer implements AutoCloseable {
                     if (n < 0) return;
                     offset += n;
                 }
+                boolean discovery = parts[0].equals("GET") && parts[1].equals("/server-info");
+                if (!discovery && !auth.accepts(headers.get("authorization"), parts[0], parts[1])) {
+                    out.write(("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: " + auth.challenge()
+                            + "\r\nContent-Length: 0\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                    out.flush();
+                    if ("close".equalsIgnoreCase(headers.get("connection"))) return;
+                    continue;
+                }
                 try { route(out, parts[0], URI.create(parts[1]), headers, body); }
                 catch (IllegalArgumentException e) { reply(out, 400, "text/plain", "Invalid media request"); }
                 catch (Exception e) { reply(out, 500, "text/plain", "Receiver error"); }
@@ -112,6 +124,7 @@ public final class AirPlayServer implements AutoCloseable {
         String path = uri.getPath();
         if (method.equals("GET") && path.equals("/server-info")) {
             plist(out, "<key>deviceid</key><string>" + deviceId + "</string>"
+                    + "<key>pw</key><true/>"
                     + "<key>features</key><integer>1</integer><key>model</key><string>AppleTV2,1</string>"
                     + "<key>protovers</key><string>1.0</string><key>srcvers</key><string>130.14</string>");
         } else if (method.equals("POST") && path.equals("/play")) {
