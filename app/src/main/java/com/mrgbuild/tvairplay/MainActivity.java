@@ -17,6 +17,7 @@ import androidx.media3.common.*;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.ui.PlayerView;
 import com.mrgbuild.receiver.AirPlayServer;
+import com.mrgbuild.receiver.ReceiverName;
 import java.net.*;
 import java.util.*;
 
@@ -28,7 +29,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     private ExoPlayer player;
     private PlayerView playerView;
     private LinearLayout home;
-    private TextView status, endpoint, playbackStatus, audioStatus, passwordStatus;
+    private TextView status, endpoint, playbackStatus, audioStatus, passwordStatus, nameStatus;
     private Button openButton;
     private AirPlayServer receiver;
     private NsdManager nsd;
@@ -38,6 +39,8 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     private String deviceId;
     private String receiverPassword;
     private android.app.AlertDialog passwordDialog;
+    private android.app.AlertDialog nameDialog;
+    private String receiverName = ReceiverName.DEFAULT;
     private int audioGeneration;
     private volatile int receiverGeneration;
     private volatile AirPlayServer.State state = new AirPlayServer.State(0, 0, false, false);
@@ -80,6 +83,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         endpoint = label("", 15, 0xFFB7C9D6); add(endpoint, 6);
         audioStatus = label("Starting legacy audio receiver…", 15, MINT); add(audioStatus, 6);
         passwordStatus = label("A receiver password is required", 15, MINT); add(passwordStatus, 6);
+        nameStatus = label("Receiver name: " + receiverName, 15, MINT); add(nameStatus, 6);
         add(label("Experimental legacy video and audio. AirPlay 2, screen mirroring and protected streaming services are not supported. iPhone compatibility needs testing.", 15, 0xFFB7C9D6), 16);
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -96,6 +100,8 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         actions.addView(stop, gap2); add(actions, 20);
         Button password = button("Set / change password");
         password.setOnClickListener(v -> showPasswordDialog()); add(password, 10);
+        Button name = button("Change receiver name");
+        name.setOnClickListener(v -> showNameDialog()); add(name, 10);
         Button licenses = button("Open-source licenses");
         licenses.setOnClickListener(v -> showLicenses()); add(licenses, 10);
         playbackStatus = label("Try a direct MP4, HLS or audio URL to test playback.", 14, 0xFFB7C9D6); add(playbackStatus, 12);
@@ -194,8 +200,36 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         }));
         passwordDialog.show();
     }
+    private void showNameDialog() {
+        if (nameDialog != null && nameDialog.isShowing()) return;
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(24), dp(8), dp(24), dp(8));
+        form.addView(label("Choose the name shown on your sender. The audio receiver adds “Audio”. Saving a new name disconnects current senders.", 15, Color.WHITE));
+        EditText input = new EditText(this); input.setSingleLine(true); input.setHint("Living Room");
+        input.setText(receiverName); input.selectAll(); form.addView(input);
+        nameDialog = new android.app.AlertDialog.Builder(this).setTitle("Receiver name").setView(form)
+                .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create();
+        nameDialog.setOnShowListener(d -> nameDialog.getButton(-1).setOnClickListener(v -> {
+            final String value;
+            try { value = ReceiverName.validate(input.getText().toString()); }
+            catch (IllegalArgumentException e) { input.setError(e.getMessage()); return; }
+            if (value.equals(receiverName)) { nameDialog.dismiss(); return; }
+            if (!getPreferences(0).edit().putString("receiverName", value).commit()) {
+                input.setError("The name could not be saved. Try again."); return;
+            }
+            stopNetworkReceivers(); player.stop(); player.clearMediaItems(); startFraction = 0;
+            state = new AirPlayServer.State(0, 0, false, false);
+            receiverName = value; nameStatus.setText("Receiver name: " + receiverName);
+            if (active && receiverPassword != null) startReceivers();
+            nameDialog.dismiss(); showHome("Receiver name saved. Refresh the receiver list on your sender.");
+        }));
+        nameDialog.show();
+    }
     @Override protected void onStart() {
         super.onStart(); active = true; main.post(refresh);
+        try { receiverName = ReceiverName.validate(getPreferences(0).getString("receiverName", ReceiverName.DEFAULT)); }
+        catch (IllegalArgumentException e) { receiverName = ReceiverName.DEFAULT; }
+        nameStatus.setText("Receiver name: " + receiverName);
         String id = getPreferences(0).getString("deviceId", null);
         if (id == null) {
             byte[] bytes = new byte[6]; new java.security.SecureRandom().nextBytes(bytes); bytes[0] = (byte)((bytes[0] | 2) & 0xfe);
@@ -237,13 +271,13 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
             endpoint.setText("Receiver address: " + addresses() + "  •  Port " + receiver.port());
             nsd = (NsdManager)getSystemService(NSD_SERVICE);
             NsdServiceInfo info = new NsdServiceInfo();
-            info.setServiceName("TV AirPlay (Legacy)"); info.setServiceType("_airplay._tcp."); info.setPort(receiver.port());
+            info.setServiceName(receiverName); info.setServiceType("_airplay._tcp."); info.setPort(receiver.port());
             info.setAttribute("deviceid", deviceId); info.setAttribute("features", "0x1"); info.setAttribute("pw", "true");
             info.setAttribute("model", "AppleTV2,1"); info.setAttribute("srcvers", "130.14");
             info.setAttribute("flags", "0x4"); info.setAttribute("vv", "1");
             registration = new NsdManager.RegistrationListener() {
-                public void onServiceRegistered(NsdServiceInfo s) { runOnUiThread(() -> { if (active) status.setText("Legacy receiver: " + s.getServiceName()); }); }
-                public void onRegistrationFailed(NsdServiceInfo s, int error) { runOnUiThread(() -> { if (active) status.setText("Receiver running • discovery failed (" + error + ")"); }); }
+                public void onServiceRegistered(NsdServiceInfo s) { runOnUiThread(() -> { if (active && receiverGeneration == generation) status.setText("Legacy receiver: " + s.getServiceName()); }); }
+                public void onRegistrationFailed(NsdServiceInfo s, int error) { runOnUiThread(() -> { if (active && receiverGeneration == generation) status.setText("Receiver running • discovery failed (" + error + ")"); }); }
                 public void onServiceUnregistered(NsdServiceInfo s) { }
                 public void onUnregistrationFailed(NsdServiceInfo s, int error) { }
             };
@@ -256,7 +290,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         startAudioReceiver();
         if (audioReceiver != null) {
             NsdServiceInfo info = new NsdServiceInfo();
-            info.setServiceName(deviceId.replace(":", "") + "@TV AirPlay Audio");
+            info.setServiceName(ReceiverName.audioServiceName(deviceId, receiverName));
             info.setServiceType("_raop._tcp."); info.setPort(audioReceiver.port());
             info.setAttribute("txtvers", "1"); info.setAttribute("ch", "2"); info.setAttribute("cn", "1");
             info.setAttribute("et", "1"); info.setAttribute("sv", "false"); info.setAttribute("da", "true");
@@ -264,8 +298,8 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
             info.setAttribute("vn", "3"); info.setAttribute("tp", "TCP,UDP"); info.setAttribute("vs", "130.14");
             info.setAttribute("sm", "false"); info.setAttribute("ek", "1");
             audioRegistration = new NsdManager.RegistrationListener() {
-                public void onServiceRegistered(NsdServiceInfo s) { runOnUiThread(() -> { if (active) audioStatus.setText("Legacy audio receiver: TV AirPlay Audio • port 5000"); }); }
-                public void onRegistrationFailed(NsdServiceInfo s, int error) { runOnUiThread(() -> { if (active) audioStatus.setText("Audio discovery failed (" + error + ")"); }); }
+                public void onServiceRegistered(NsdServiceInfo s) { runOnUiThread(() -> { if (active && receiverGeneration == generation) audioStatus.setText("Legacy audio receiver: " + s.getServiceName().substring(s.getServiceName().indexOf('@') + 1)); }); }
+                public void onRegistrationFailed(NsdServiceInfo s, int error) { runOnUiThread(() -> { if (active && receiverGeneration == generation) audioStatus.setText("Audio discovery failed (" + error + ")"); }); }
                 public void onServiceUnregistered(NsdServiceInfo s) { }
                 public void onUnregistrationFailed(NsdServiceInfo s, int error) { }
             };

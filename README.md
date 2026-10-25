@@ -38,6 +38,24 @@ connect to it. Legacy RAOP audio is a separate receiver from direct media URLs.
   and no media-URL logging.
 - Receiver and playback stop when the app leaves the foreground.
 
+## Receiver name and video resolution (version 0.3.0)
+
+Select **Change receiver name** on the TV, enter a name such as **Living Room**,
+and save. Video discovery uses **Living Room**; audio discovery uses **Living Room
+Audio**. The name is stored locally and restored after reopening the app. Renaming
+disconnects active senders and refreshes discovery; your password stays unchanged.
+Refresh the receiver list on your sender if it still shows the old name. Android
+may append a number if another receiver already uses the same name. Use a short
+name; blank names, control characters and names over 40 UTF-8 bytes are rejected
+to fit the audio protocol's discovery label.
+
+The video player has no fixed 720p/1080p resolution cap. Playback depends on the
+source stream, codec, device decoder, TV output mode and network. A Chromecast
+with Google TV (4K) may play compatible 4K sources; the HD model outputs up to
+1080p. Adaptive streams may choose lower quality based on bandwidth and device
+capabilities. The app does not upscale source detail or implement screen
+mirroring. 4K playback and sender interoperability have not been device-tested.
+
 ## Receiver password (version 0.2.0)
 
 On first launch, choose and confirm a password on the TV. Both network receivers
