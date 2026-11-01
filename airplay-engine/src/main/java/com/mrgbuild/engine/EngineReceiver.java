@@ -14,11 +14,14 @@ public final class EngineReceiver implements AutoCloseable {
     private final AirPlayConfig config;
     private final ConnectionHistory history = new ConnectionHistory();
     public EngineReceiver(String name, String id, String password, byte[] identitySeed, Playback playback) {
+        this(name,id,password,identitySeed,playback,MirrorQuality.COMPATIBLE);
+    }
+    public EngineReceiver(String name, String id, String password, byte[] identitySeed, Playback playback, MirrorQuality quality) {
         if (password == null || password.isEmpty()) throw new IllegalArgumentException("Password required");
         config = new AirPlayConfig(); config.setServerName(name); config.setDeviceId(id); config.setPassword(password);
         byte[] token=new byte[32];new java.security.SecureRandom().nextBytes(token);StringBuilder hex=new StringBuilder();
         for(byte b:token)hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));config.setPlaybackToken(hex.toString());
-        config.setWidth(1920); config.setHeight(1080); config.setFps(30); config.setHlsEnabled(true);
+        config.setWidth(quality.width); config.setHeight(quality.height); config.setFps(quality.fps); config.setHlsEnabled(true);
         identity = PairingIdentity.fromSeed(identitySeed);
         this.name = name; this.id = id;
         server = new ControlServer(config, playback, identity, history::add);

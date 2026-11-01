@@ -25,10 +25,11 @@ final class MirrorVideoPlayer {
     private volatile byte[] configPacket;
     private boolean shown;
     private volatile String phase="Idle";
-    String diagnostics(){return phase;}
+    private volatile String pictureSize="";
+    String diagnostics(){return phase+(pictureSize.isEmpty()?"":" • decoded "+pictureSize);}
     MirrorVideoPlayer(Consumer<String> status) { this(status,ratio -> {}); }
     MirrorVideoPlayer(Consumer<String> status,Consumer<Float> pictureAspect) { this.status=status;this.pictureAspect=pictureAspect;thread.start();handler=new Handler(thread.getLooper()); }
-    void begin() { frames.clear();configPacket=null;active=true;status.accept("Starting screen mirroring"); handler.post(() -> { release();sps=null;pps=null;shown=false;handler.removeCallbacks(tick);handler.post(tick); }); }
+    void begin() { frames.clear();configPacket=null;pictureSize="";active=true;status.accept("Starting screen mirroring"); handler.post(() -> { release();sps=null;pps=null;shown=false;handler.removeCallbacks(tick);handler.post(tick); }); }
     void surface(Surface value) { handler.post(() -> { if(surface!=value){release();surface=value;} }); }
     void enqueue(byte[] bytes) {
         if (!active || bytes==null || bytes.length>4*1024*1024) return;
@@ -77,6 +78,7 @@ final class MirrorVideoPlayer {
                     var parsed=NalUnitUtil.parseSpsNalUnit(sps,4,sps.length);
                     if(parsed.width<1||parsed.height<1||parsed.width>4096||parsed.height>4096)throw new IllegalArgumentException("Unsupported mirror dimensions");
                     pictureAspect.accept(parsed.width*parsed.pixelWidthHeightRatio/parsed.height);
+                    pictureSize=parsed.width+"×"+parsed.height;
                     MediaFormat format=MediaFormat.createVideoFormat("video/avc",parsed.width,parsed.height);
                     format.setByteBuffer("csd-0",ByteBuffer.wrap(sps));format.setByteBuffer("csd-1",ByteBuffer.wrap(pps));
                     format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE,4*1024*1024);

@@ -23,7 +23,7 @@ final class ReceiverController {
     private volatile String localToken="";
     private volatile Inet4Address currentAddress;
     ReceiverController(Context context,Consumer<String> status){this.context=context.getApplicationContext();this.status=status;}
-    void start(String name,String id,String password,Playback playback){
+    void start(String name,String id,String password,Playback playback,com.mrgbuild.engine.MirrorQuality quality){
         int current=generation.incrementAndGet();
         status.accept("Starting receiver…");
         worker.execute(() -> {
@@ -34,13 +34,13 @@ final class ReceiverController {
                 currentAddress=address;
                 WifiManager wifi=(WifiManager)context.getSystemService(Context.WIFI_SERVICE);
                 if(wifi!=null){multicast=wifi.createMulticastLock("TVAirPlay-discovery");multicast.setReferenceCounted(false);multicast.acquire();}
-                receiver=new EngineReceiver(name,id,password,PairingIdentityStore.load(context),playback);
+                receiver=new EngineReceiver(name,id,password,PairingIdentityStore.load(context),playback,quality);
                 localToken=receiver.localPlaybackToken();
                 receiver.start(address);
                 if(generation.get()!=current){closeCurrent();return;}
                 String nic=NetworkInterface.getByInetAddress(address).getName();
                 diagnostics="Receiver: "+name+"\nNetwork: "+nic+"\nAddress: "+address.getHostAddress()+":"+receiver.port()
-                        +"\nDiscovery: direct IPv4 multicast DNS (_airplay._tcp and _raop._tcp)\nPassword: required\nProtocol: H.264 mirroring, ALAC/AAC audio, HLS video\nLocal registration completed; visibility on your phone still depends on LAN multicast.\nKeep this app open on the TV.";
+                        +"\nRequested mirror quality: "+quality.label+"\nDiscovery: direct IPv4 multicast DNS (_airplay._tcp and _raop._tcp)\nPassword: required\nProtocol: H.264 mirroring, ALAC/AAC audio, HLS video\nLocal registration completed; visibility on your phone still depends on LAN multicast.\nKeep this app open on the TV.";
                 status.accept("Advertising “"+name+"” • "+address.getHostAddress()+":"+receiver.port());
             }catch(Exception|LinkageError e){
                 closeCurrent();if(generation.get()!=current)return;

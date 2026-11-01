@@ -1,4 +1,4 @@
-# TV AirPlay — receiver rebuild 0.4.4
+# TV AirPlay — receiver rebuild 0.4.5
 
 Android TV / Chromecast with Google TV receiver. The app layer remains privately
 licensed; its third-party components have their own licenses. Versions 0.1–0.3
@@ -21,6 +21,16 @@ The development APK is debug-signed; its SHA-256 is in `downloads/TV-AirPlay-deb
    physical iPhone-to-TV interoperability still needs testing.
 5. If absent, select **Restart discovery**, then **Connection diagnostics**, and
    report the displayed status and which phone app/menu was used.
+
+Version 0.4.5 adds a saved **Mirroring quality** selector. High detail requests
+up to 3840×2160 at 30 fps when a hardware AVC decoder reports support in both
+orientations; Smooth requests 1080p60 on compatible decoders; Compatible keeps
+1080p30. High detail is the default when supported, otherwise Compatible.
+Unsupported saved profiles fall back safely. Applying a change disconnects the
+current sender; reconnect from the phone. Diagnostics show both requested quality
+and actual decoded dimensions. These limits do not force the iPhone's resolution
+or bitrate, restore compression losses, or establish physical 4K interoperability.
+Higher detail increases network and decoder load; select Compatible if unstable.
 
 Version 0.4.4 fits mirroring to the decoded picture's aspect ratio, including
 H.264 crop and sample aspect ratio. Portrait is centered with black side bars;
@@ -78,7 +88,7 @@ router forwards multicast between its Wi-Fi clients.
 - Password protection remains mandatory. Media setup/control uses legacy Digest
   authentication. Local playlist reads need a per-process token sent only to
   loopback addresses. This is not HomeKit pairing or Apple certification.
-- Mirroring initially advertises 1920×1080 at 30 fps; the decoder follows the source
+- Mirroring advertises the selected supported quality; the decoder follows the source
   H.264 configuration. HLS/direct video depends on source, codec, TV and bandwidth.
   A 4K Chromecast may play compatible 4K media; the HD model outputs at most 1080p.
   Physical 4K playback and buffered/multiroom AirPlay 2 are not validated/supported.

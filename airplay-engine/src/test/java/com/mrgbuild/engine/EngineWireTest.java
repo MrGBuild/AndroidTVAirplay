@@ -56,6 +56,23 @@ class EngineWireTest {
             assertTrue(((NSNumber)info.objectForKey("password")).boolValue());
         }
     }
+    @Test void selectedQualityIsUsedInTheDisplayNegotiation()throws Exception{
+        for(MirrorQuality quality:MirrorQuality.values()){
+            try(EngineReceiver configured=new EngineReceiver("Quality Test","02:11:22:33:44:55",PASSWORD,new byte[32],new Playback(){
+                public void onVideoFormat(VideoStreamInfo i){}public void onVideo(byte[] b){}public void onVideoSrcDisconnect(){}
+                public void onAudioFormat(AudioStreamInfo i){}public void onAudio(byte[] b){}public void onAudioSrcDisconnect(){}
+            },quality)){
+                configured.startWithoutDiscoveryForTest();try(Wire wire=new Wire(configured.port())){
+                    var response=wire.send("GET","/info",new byte[0],null);assertEquals(200,response.code);
+                    var info=(NSDictionary)PropertyListParser.parse(response.body);
+                    var display=(NSDictionary)((NSArray)info.objectForKey("displays")).objectAtIndex(0);
+                    assertEquals(quality.width,((NSNumber)display.objectForKey("widthPixels")).intValue());
+                    assertEquals(quality.height,((NSNumber)display.objectForKey("heightPixels")).intValue());
+                    assertEquals(quality.fps,((NSNumber)display.objectForKey("maxFPS")).intValue());
+                }
+            }
+        }
+    }
     @Test void missingAndIncorrectPasswordsCannotSetUpMedia()throws Exception {
         try(Wire w=new Wire(receiver.port())){var challenge=w.send("SETUP","rtsp://receiver/session",setup(),null);assertEquals(401,challenge.code);
             var wrong=w.send("SETUP","rtsp://receiver/session",setup(),auth(challenge,"SETUP","rtsp://receiver/session","incorrect"));assertEquals(401,wrong.code);}

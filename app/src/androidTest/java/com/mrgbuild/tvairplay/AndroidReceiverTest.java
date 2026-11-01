@@ -76,6 +76,10 @@ public class AndroidReceiverTest {
                 if(message[0].startsWith("Advertising"))break;Thread.sleep(200);
             }
             assertTrue(message[0],message[0].startsWith("Advertising")&&message[0].contains("Android Fixture"));
+            instrumentation.runOnMainSync(() -> {
+                android.widget.Button quality=activity.getWindow().getDecorView().findViewWithTag("mirror-quality");
+                assertNotNull(quality);assertTrue(quality.getText().toString().startsWith("Mirroring quality: "));
+            });
         }finally{instrumentation.runOnMainSync(activity::finish);}
     }
     private byte[] asset(String name)throws Exception{

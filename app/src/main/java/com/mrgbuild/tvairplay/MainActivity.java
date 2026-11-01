@@ -36,6 +36,9 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     private LinearLayout home;
     private TextView status, endpoint, playbackStatus, audioStatus, passwordStatus, nameStatus;
     private Button openButton;
+    private Button qualityButton;
+    private java.util.List<com.mrgbuild.engine.MirrorQuality> qualityChoices;
+    private com.mrgbuild.engine.MirrorQuality mirrorQuality;
     private ReceiverController controller;
     private MirrorVideoPlayer mirror;
     private AirPlayAudioPlayer airAudio;
@@ -126,6 +129,8 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         password.setOnClickListener(v -> showPasswordDialog()); add(password, 10);
         Button name = button("Change receiver name");
         name.setOnClickListener(v -> showNameDialog()); add(name, 10);
+        qualityButton=button("Mirroring quality");qualityButton.setTag("mirror-quality");qualityButton.setOnClickListener(v -> showQualityDialog());add(qualityButton,10);
+        add(label("Higher detail needs more Wi-Fi bandwidth. Your iPhone chooses the actual stream quality.",14,0xFFB7C9D6),6);
         Button retry=button("Restart discovery");retry.setOnClickListener(v -> restartReceiver());add(retry,10);
         Button diagnostics=button("Connection diagnostics");diagnostics.setOnClickListener(v -> new android.app.AlertDialog.Builder(this).setTitle("Connection diagnostics").setMessage(controller.diagnostics()+"\nMirror: "+mirror.diagnostics()+"\n\nThis app sends no diagnostic reports to a server.").setPositiveButton("Close",null).show());add(diagnostics,10);
         Button licenses = button("Open-source licenses");
@@ -321,8 +326,30 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
             }
         };
         audioStatus.setText("Video and audio share the receiver name “"+receiverName+"”");
-        controller.start(receiverName,deviceId,receiverPassword,playback);
+        loadMirrorQuality();
+        qualityButton.setText("Mirroring quality: "+mirrorQuality.label);
+        controller.start(receiverName,deviceId,receiverPassword,playback,mirrorQuality);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+    private void loadMirrorQuality(){
+        if(qualityChoices==null){
+            qualityChoices=MirrorQualitySupport.supported();
+            mirrorQuality=qualityChoices.contains(com.mrgbuild.engine.MirrorQuality.DETAIL)?com.mrgbuild.engine.MirrorQuality.DETAIL:com.mrgbuild.engine.MirrorQuality.COMPATIBLE;
+            try{var saved=com.mrgbuild.engine.MirrorQuality.valueOf(getPreferences(0).getString("mirrorQuality",mirrorQuality.name()));if(qualityChoices.contains(saved))mirrorQuality=saved;}catch(IllegalArgumentException ignored){}
+        }
+    }
+    private void showQualityDialog(){
+        loadMirrorQuality();String[] labels=new String[qualityChoices.size()];for(int i=0;i<labels.length;i++)labels[i]=qualityChoices.get(i).label;
+        int[] selected={qualityChoices.indexOf(mirrorQuality)};
+        new android.app.AlertDialog.Builder(this).setTitle("Mirroring quality (reconnects)")
+                .setSingleChoiceItems(labels,selected[0],(dialog,which) -> selected[0]=which)
+                .setNegativeButton("Cancel",null).setPositiveButton("Apply",(dialog,which) -> {
+                    var choice=qualityChoices.get(selected[0]);if(choice==mirrorQuality)return;
+                    if(!getPreferences(0).edit().putString("mirrorQuality",choice.name()).commit()){
+                        android.widget.Toast.makeText(this,"Quality setting could not be saved",android.widget.Toast.LENGTH_SHORT).show();return;
+                    }
+                    mirrorQuality=choice;qualityButton.setText("Mirroring quality: "+choice.label);restartReceiver();
+                }).show();
     }
     private String addresses() {
         List<String> result = new ArrayList<>();
