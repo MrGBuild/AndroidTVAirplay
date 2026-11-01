@@ -40,7 +40,16 @@ public class ControlServer implements Runnable {
     @Getter
     private volatile int port;
 
+    private final java.util.function.Consumer<String> diagnostics;
+    private final java.util.concurrent.atomic.AtomicInteger connectionIds = new java.util.concurrent.atomic.AtomicInteger();
+
     public ControlServer(AirPlayConfig airPlayConfig, Playback airPlayConsumer, PairingIdentity identity) {
+        this(airPlayConfig, airPlayConsumer, identity, event -> {});
+    }
+
+    public ControlServer(AirPlayConfig airPlayConfig, Playback airPlayConsumer, PairingIdentity identity,
+                         java.util.function.Consumer<String> diagnostics) {
+        this.diagnostics = diagnostics;
         this.sessionManager = new SessionManager(identity);
         this.airPlayConfig = airPlayConfig;
         this.airPlayConsumer = airPlayConsumer;
@@ -101,8 +110,15 @@ public class ControlServer implements Runnable {
                                     new RtspDecoder(),
                                     new RtspEncoder(),
                                     new HttpObjectAggregator(2 * 1024 * 1024),
+                                    new com.mrgbuild.engine.ControlTrace(diagnostics, connectionIds.incrementAndGet()),
                                     new com.mrgbuild.engine.PasswordGate(airPlayConfig.getPassword(),airPlayConfig.getPlaybackToken()),
-                                    new ControlHandler(sessionManager, hlsFcupService, airPlayConfig, airPlayConsumer));
+                                    new ControlHandler(sessionManager, hlsFcupService, airPlayConfig, airPlayConsumer),
+                                    new io.netty.channel.ChannelInboundHandlerAdapter() {
+                                        @Override public void exceptionCaught(io.netty.channel.ChannelHandlerContext ctx, Throwable cause) {
+                                            diagnostics.accept("Protocol handler failed; connection closed");
+                                            ctx.close();
+                                        }
+                                    });
                         }
                     })
                     .childOption(ChannelOption.SO_RCVBUF, 256 * 1024)

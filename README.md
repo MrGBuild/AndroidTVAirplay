@@ -1,4 +1,4 @@
-# TV AirPlay — receiver rebuild 0.4.0
+# TV AirPlay — receiver rebuild 0.4.1
 
 Android TV / Chromecast with Google TV receiver. The app layer remains privately
 licensed; its third-party components have their own licenses. Versions 0.1–0.3
@@ -21,6 +21,14 @@ The development APK is debug-signed; its SHA-256 is in `downloads/TV-AirPlay-deb
    physical iPhone-to-TV interoperability still needs testing.
 5. If absent, select **Restart discovery**, then **Connection diagnostics**, and
    report the displayed status and which phone app/menu was used.
+
+Version 0.4.1 preserves the live UDP timing port in the mirroring SETUP response
+and adds a bounded, memory-only connection history. It includes TCP connections,
+early info probes, password challenges, response codes and protocol failures.
+The old "Last sender event" field omitted early requests and was misleading.
+History omits addresses, credentials, headers, bodies and media URLs. Reproduce
+the failure before opening diagnostics; restarting the receiver clears history.
+This update has not yet been verified against the reported physical iPhone/TV failure.
 
 The first 0.4 launch changes the discovery identity once to avoid cached legacy
 capabilities. The new pairing identity is then kept encrypted locally. The chosen

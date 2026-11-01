@@ -229,7 +229,7 @@ public class ControlHandler extends ChannelInboundHandlerAdapter {
                     log.info("SESSION mode=MIRROR session={} videoPort={}",
                             session.getId(), session.getVideoServer().getPort());
                     var setup = PropertyListUtil.prepareSetupVideoResponse(session.getVideoServer().getPort(),
-                            ((ServerSocketChannel) ctx.channel().parent()).localAddress().getPort(), 0);
+                            ((ServerSocketChannel) ctx.channel().parent()).localAddress().getPort(), airPlayConfig.getTimingPort());
                     response.content().writeBytes(setup);
                 }
             }

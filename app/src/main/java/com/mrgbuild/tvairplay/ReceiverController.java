@@ -50,7 +50,7 @@ final class ReceiverController {
             }
         });
     }
-    String diagnostics(){return diagnostics;}
+    String diagnostics(){EngineReceiver current=receiver;return diagnostics+"\n\nConnection history (this receiver start):\n"+(current==null?"Receiver stopped":current.connectionDiagnostics());}
     String localPlaybackToken(){return localToken;}
     int localPlaybackPort(){EngineReceiver current=receiver;return current==null?0:current.port();}
     boolean networkChanged(){Inet4Address now=lanAddress();return(currentAddress!=null&&!currentAddress.equals(now))||(diagnostics.startsWith("Receiver did not start")&&now!=null);}

@@ -57,6 +57,39 @@ class EngineWireTest {
         try(Wire w=new Wire(receiver.port())){var challenge=w.send("SETUP","rtsp://receiver/session",setup(),null);assertEquals(401,challenge.code);
             var wrong=w.send("SETUP","rtsp://receiver/session",setup(),auth(challenge,"SETUP","rtsp://receiver/session","incorrect"));assertEquals(401,wrong.code);}
     }
+    @Test void earlyRequestsAndPasswordChallengesAppearWithoutSenderSecrets()throws Exception {
+        try(Wire w=new Wire(receiver.port())){
+            assertEquals(200,w.send("GET","/info",new byte[0],null).code);
+            assertEquals(401,w.send("SETUP","rtsp://receiver/private-user-url",setup(),null).code);
+            String history=receiver.connectionDiagnostics();
+            assertTrue(history.contains("TCP opened"));assertTrue(history.contains("GET /info"));
+            assertTrue(history.contains("Response 401"));assertFalse(history.contains("private-user-url"));
+            assertFalse(history.contains(PASSWORD));assertFalse(history.contains("nonce="));
+        }
+    }
+    @Test void mirroringSetupKeepsTheLiveTimingPortAndAcceptsVideoConnections()throws Exception {
+        try(Wire w=new Wire(receiver.port())){
+            String uri="rtsp://receiver/session";var challenge=w.send("SETUP",uri,setup(),null);
+            var initial=w.send("SETUP",uri,setup(),auth(challenge,"SETUP",uri,PASSWORD));assertEquals(200,initial.code);
+            int timing=((NSNumber)((NSDictionary)PropertyListParser.parse(initial.body)).objectForKey("timingPort")).intValue();
+            NSDictionary video=new NSDictionary(),stream=new NSDictionary();stream.put("type",110);stream.put("streamConnectionID",12345L);
+            video.put("streams",new NSArray(stream));
+            var response=w.send("SETUP",uri,BinaryPropertyListWriter.writeToArray(video),null);assertEquals(200,response.code);
+            var result=(NSDictionary)PropertyListParser.parse(response.body);
+            assertEquals(timing,((NSNumber)result.objectForKey("timingPort")).intValue());assertTrue(timing>0);
+            var streams=(NSArray)result.objectForKey("streams");int port=((NSNumber)((NSDictionary)streams.objectAtIndex(0)).objectForKey("dataPort")).intValue();
+            try(Socket media=new Socket("127.0.0.1",port)){assertTrue(media.isConnected());}
+        }
+    }
+    @Test void handlerFailureIsVisibleEvenWithoutACompletedResponse()throws Exception {
+        try(Wire w=new Wire(receiver.port())){
+            String uri="/stream";var challenge=w.send("SETUP",uri,setup(),null);
+            assertEquals(200,w.send("SETUP",uri,setup(),auth(challenge,"SETUP",uri,PASSWORD)).code);
+            w.out.write("SETUP /stream RTSP/1.0\r\nCSeq: 3\r\nContent-Length: 3\r\n\r\nbad".getBytes(StandardCharsets.US_ASCII));w.out.flush();
+            assertEquals(-1,w.in.read());
+            assertTrue(receiver.connectionDiagnostics().contains("Protocol handler failed"));
+        }
+    }
     @Test void correctPasswordStartsTimingNegotiation()throws Exception {
         try(Wire w=new Wire(receiver.port())){String uri="rtsp://receiver/session";var challenge=w.send("SETUP",uri,setup(),null);
             var accepted=w.send("SETUP",uri,setup(),auth(challenge,"SETUP",uri,PASSWORD));assertEquals(200,accepted.code);

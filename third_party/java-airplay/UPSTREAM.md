@@ -12,3 +12,7 @@ The upstream org.whispersystems Curve25519 dependency (GPLv3) is excluded. X2551
 uses the Bouncy Castle lightweight API instead. Public pairing identity is persisted
 by the Android adapter. Password gating, timing replies and actual network discovery
 checks are supplied by the app. Diagnostic payload dumping is not enabled.
+
+0.4.1 adds app-owned connection tracing before password gating and a sanitized
+terminal exception handler. Mirroring SETUP responses retain the same live UDP
+timing port as initial SETUP instead of returning zero.

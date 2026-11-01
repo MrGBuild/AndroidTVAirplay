@@ -128,7 +128,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         Button name = button("Change receiver name");
         name.setOnClickListener(v -> showNameDialog()); add(name, 10);
         Button retry=button("Restart discovery");retry.setOnClickListener(v -> restartReceiver());add(retry,10);
-        Button diagnostics=button("Connection diagnostics");diagnostics.setOnClickListener(v -> new android.app.AlertDialog.Builder(this).setTitle("Connection diagnostics").setMessage(controller.diagnostics()+"\nMirror: "+mirror.diagnostics()+"\n\nLast sender event: "+latestExchange+"\n\nThis app sends no diagnostic reports to a server.").setPositiveButton("Close",null).show());add(diagnostics,10);
+        Button diagnostics=button("Connection diagnostics");diagnostics.setOnClickListener(v -> new android.app.AlertDialog.Builder(this).setTitle("Connection diagnostics").setMessage(controller.diagnostics()+"\nMirror: "+mirror.diagnostics()+"\n\nThis app sends no diagnostic reports to a server.").setPositiveButton("Close",null).show());add(diagnostics,10);
         Button licenses = button("Open-source licenses");
         licenses.setOnClickListener(v -> showLicenses()); add(licenses, 10);
         playbackStatus = label("Try a direct MP4, HLS or audio URL to test playback.", 14, 0xFFB7C9D6); add(playbackStatus, 12);
