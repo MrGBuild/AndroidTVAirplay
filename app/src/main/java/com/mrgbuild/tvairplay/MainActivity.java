@@ -4,8 +4,14 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.net.nsd.NsdManager;
-import android.net.nsd.NsdServiceInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.LinkProperties;
+import android.view.SurfaceView;
+import android.view.SurfaceHolder;
+import com.github.serezhka.airplay.server.Playback;
+import com.github.serezhka.airplay.protocol.media.AudioStreamInfo;
+import com.github.serezhka.airplay.protocol.media.VideoStreamInfo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -31,21 +37,23 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     private LinearLayout home;
     private TextView status, endpoint, playbackStatus, audioStatus, passwordStatus, nameStatus;
     private Button openButton;
-    private AirPlayServer receiver;
-    private NsdManager nsd;
-    private NsdManager.RegistrationListener registration;
-    private NsdManager.RegistrationListener audioRegistration;
-    private NativeRaop audioReceiver;
+    private ReceiverController controller;
+    private MirrorVideoPlayer mirror;
+    private AirPlayAudioPlayer airAudio;
+    private SurfaceView mirrorView;
+    private ConnectivityManager connectivity;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private volatile Playback.Observer playbackObserver=Playback.Observer.NONE;
+    private volatile String latestExchange="No sender requests received";
     private String deviceId;
     private String receiverPassword;
     private android.app.AlertDialog passwordDialog;
     private android.app.AlertDialog nameDialog;
     private String receiverName = ReceiverName.DEFAULT;
-    private int audioGeneration;
     private volatile int receiverGeneration;
     private volatile AirPlayServer.State state = new AirPlayServer.State(0, 0, false, false);
     private double startFraction;
-    private boolean active;
+    private volatile boolean active;
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
             if (!active) return;
@@ -58,9 +66,25 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        player = new ExoPlayer.Builder(this).build();
+        var dataSources=new androidx.media3.datasource.ResolvingDataSource.Factory(new androidx.media3.datasource.DefaultDataSource.Factory(this),spec -> {
+            String host=spec.uri.getHost();
+            if(controller!=null&&("127.0.0.1".equals(host)||"localhost".equals(host)||"::1".equals(host))&&spec.uri.getPort()==controller.localPlaybackPort()&&!controller.localPlaybackToken().isEmpty())
+                return spec.withAdditionalHeaders(java.util.Collections.singletonMap("X-TVAirPlay-Local",controller.localPlaybackToken()));
+            return spec;
+        });
+        player = new ExoPlayer.Builder(this).setMediaSourceFactory(new androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSources)).setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT,true).build();
+        mirror=new MirrorVideoPlayer(message -> runOnUiThread(() -> {if(active)playbackStatus.setText(message);}));
+        airAudio=new AirPlayAudioPlayer(message -> runOnUiThread(() -> {if(active)playbackStatus.setText(message);}));
+        controller=new ReceiverController(this,message -> runOnUiThread(() -> {if(active){status.setText(message);endpoint.setText("Open Connection diagnostics for network details");}}));
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(INK);
+        mirrorView=new SurfaceView(this);mirrorView.setTag("mirror-output");mirrorView.setVisibility(View.GONE);
+        mirrorView.getHolder().addCallback(new SurfaceHolder.Callback(){
+            public void surfaceCreated(SurfaceHolder holder){mirror.surface(holder.getSurface());}
+            public void surfaceChanged(SurfaceHolder holder,int format,int width,int height){mirror.surface(holder.getSurface());}
+            public void surfaceDestroyed(SurfaceHolder holder){mirror.surface(null);}
+        });
+        root.addView(mirrorView,new FrameLayout.LayoutParams(-1,-1));
         playerView = new PlayerView(this);
         playerView.setPlayer(player);
         playerView.setVisibility(View.GONE);
@@ -80,11 +104,12 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         title.setTypeface(null, Typeface.BOLD); add(title, 12);
         add(label("Keep this screen open and use the same trusted Wi-Fi as your sender.", 17, 0xFFB7C9D6), 10);
         status = label("Starting receiver…", 21, MINT); add(status, 24);
+        status.setTag("receiver-status");
         endpoint = label("", 15, 0xFFB7C9D6); add(endpoint, 6);
         audioStatus = label("Starting legacy audio receiver…", 15, MINT); add(audioStatus, 6);
         passwordStatus = label("A receiver password is required", 15, MINT); add(passwordStatus, 6);
         nameStatus = label("Receiver name: " + receiverName, 15, MINT); add(nameStatus, 6);
-        add(label("Experimental legacy video and audio. AirPlay 2, screen mirroring and protected streaming services are not supported. iPhone compatibility needs testing.", 15, 0xFFB7C9D6), 16);
+        add(label("Rebuilt receiver: mirroring, audio and video. Protected streaming services may refuse playback. Phone/TV compatibility is still being tested.", 15, 0xFFB7C9D6), 16);
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         Button open = button("Open media URL");
@@ -102,6 +127,8 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         password.setOnClickListener(v -> showPasswordDialog()); add(password, 10);
         Button name = button("Change receiver name");
         name.setOnClickListener(v -> showNameDialog()); add(name, 10);
+        Button retry=button("Restart discovery");retry.setOnClickListener(v -> restartReceiver());add(retry,10);
+        Button diagnostics=button("Connection diagnostics");diagnostics.setOnClickListener(v -> new android.app.AlertDialog.Builder(this).setTitle("Connection diagnostics").setMessage(controller.diagnostics()+"\nMirror: "+mirror.diagnostics()+"\n\nLast sender event: "+latestExchange+"\n\nThis app sends no diagnostic reports to a server.").setPositiveButton("Close",null).show());add(diagnostics,10);
         Button licenses = button("Open-source licenses");
         licenses.setOnClickListener(v -> showLicenses()); add(licenses, 10);
         playbackStatus = label("Try a direct MP4, HLS or audio URL to test playback.", 14, 0xFFB7C9D6); add(playbackStatus, 12);
@@ -112,13 +139,24 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
                     double fraction = startFraction; startFraction = 0;
                     player.seekTo((long)(player.getDuration() * fraction));
                 }
-                if (value == Player.STATE_ENDED) showHome("Playback finished");
+                if (value == Player.STATE_ENDED) {playbackObserver.onEnded();showHome("Playback finished");}
             }
+            @Override public void onRenderedFirstFrame(){playbackObserver.onPresented();playbackObserver.onSeekDisplayed();}
             @Override public void onPlayerError(PlaybackException error) {
                 showHome("Could not play media (" + error.getErrorCodeName() + "). Check the URL and format.");
             }
         });
+        connectivity=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
+        networkCallback=new ConnectivityManager.NetworkCallback(){
+            public void onAvailable(Network network){scheduleReconnect();}
+            public void onLost(Network network){scheduleReconnect();}
+            public void onLinkPropertiesChanged(Network network,LinkProperties props){scheduleReconnect();}
+        };
+        connectivity.registerDefaultNetworkCallback(networkCallback);
     }
+    private final Runnable reconnect=() -> {if(active&&receiverPassword!=null&&controller.networkChanged())restartReceiver();};
+    private void scheduleReconnect(){main.removeCallbacks(reconnect);main.postDelayed(reconnect,1500);}
+    private void restartReceiver(){stopNetworkReceivers();player.stop();player.clearMediaItems();if(active&&receiverPassword!=null)startReceivers();showHome("Restarting discovery. Refresh AirPlay on your phone.");}
     private void add(View view, int top) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2); p.topMargin = dp(top); home.addView(view, p);
     }
@@ -152,7 +190,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     }
     private void showLicenses() {
         StringBuilder text = new StringBuilder();
-        for (String file : new String[]{"THIRD_PARTY.txt", "LGPL-2.1.txt", "GPL-2.txt", "Apache-2.0.txt"}) {
+        for (String file : new String[]{"THIRD_PARTY.txt", "Apache-2.0.txt"}) {
             try (java.io.InputStream in = getAssets().open("licenses/" + file)) {
                 java.io.ByteArrayOutputStream data = new java.io.ByteArrayOutputStream();
                 byte[] bytes = new byte[4096]; int n;
@@ -231,14 +269,16 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         catch (IllegalArgumentException e) { receiverName = ReceiverName.DEFAULT; }
         nameStatus.setText("Receiver name: " + receiverName);
         String id = getPreferences(0).getString("deviceId", null);
-        if (id == null) {
+        if (id == null || !getPreferences(0).getBoolean("receiverRebuildIdentityV4",false)) {
             byte[] bytes = new byte[6]; new java.security.SecureRandom().nextBytes(bytes); bytes[0] = (byte)((bytes[0] | 2) & 0xfe);
             StringBuilder b = new StringBuilder();
             for (byte value : bytes) { if (b.length() > 0) b.append(':'); b.append(String.format(Locale.ROOT, "%02X", value & 255)); }
-            id = b.toString(); getPreferences(0).edit().putString("deviceId", id).apply();
+            id = b.toString();
+            if(!getPreferences(0).edit().putString("deviceId",id).putBoolean("receiverRebuildIdentityV4",true).commit()) {
+                status.setText("Receiver identity could not be saved. Connections remain closed.");return;
+            }
         }
         deviceId = id;
-        nsd = (NsdManager)getSystemService(NSD_SERVICE);
         try { receiverPassword = new PasswordStore(this).load(); }
         catch (java.security.GeneralSecurityException | java.io.IOException | RuntimeException e) {
             receiverPassword = null;
@@ -252,76 +292,38 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         startReceivers();
     }
     private void startReceivers() {
-        if (!active || receiverPassword == null) return;
-        passwordStatus.setText("Password protection is on • applies to audio and video controls");
-        final int generation = ++receiverGeneration;
-        try {
-            receiver = new AirPlayServer(7000, deviceId, receiverPassword, new AirPlayServer.Playback() {
-                private void dispatch(Runnable command) {
-                    main.post(() -> { if (active && receiverGeneration == generation) command.run(); });
-                }
-                public void play(String url, double fraction) { dispatch(() -> MainActivity.this.play(url, fraction)); }
-                public void pause(boolean paused) { dispatch(() -> MainActivity.this.pause(paused)); }
-                public void seek(double seconds) { dispatch(() -> MainActivity.this.seek(seconds)); }
-                public void stop() { dispatch(() -> MainActivity.this.stop()); }
-                public AirPlayServer.State state() {
-                    return receiverGeneration == generation ? MainActivity.this.state() : new AirPlayServer.State(0, 0, false, false);
-                }
-            }); receiver.start();
-            endpoint.setText("Receiver address: " + addresses() + "  •  Port " + receiver.port());
-            nsd = (NsdManager)getSystemService(NSD_SERVICE);
-            NsdServiceInfo info = new NsdServiceInfo();
-            info.setServiceName(receiverName); info.setServiceType("_airplay._tcp."); info.setPort(receiver.port());
-            info.setAttribute("deviceid", deviceId); info.setAttribute("features", "0x1"); info.setAttribute("pw", "true");
-            info.setAttribute("model", "AppleTV2,1"); info.setAttribute("srcvers", "130.14");
-            info.setAttribute("flags", "0x4"); info.setAttribute("vv", "1");
-            registration = new NsdManager.RegistrationListener() {
-                public void onServiceRegistered(NsdServiceInfo s) { runOnUiThread(() -> { if (active && receiverGeneration == generation) status.setText("Legacy receiver: " + s.getServiceName()); }); }
-                public void onRegistrationFailed(NsdServiceInfo s, int error) { runOnUiThread(() -> { if (active && receiverGeneration == generation) status.setText("Receiver running • discovery failed (" + error + ")"); }); }
-                public void onServiceUnregistered(NsdServiceInfo s) { }
-                public void onUnregistrationFailed(NsdServiceInfo s, int error) { }
-            };
-            nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, registration);
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        } catch (Exception e) {
-            if (receiver != null) { receiver.close(); receiver = null; }
-            status.setText("Receiver could not start. Close other receivers and reopen the app.");
-        }
-        startAudioReceiver();
-        if (audioReceiver != null) {
-            NsdServiceInfo info = new NsdServiceInfo();
-            info.setServiceName(ReceiverName.audioServiceName(deviceId, receiverName));
-            info.setServiceType("_raop._tcp."); info.setPort(audioReceiver.port());
-            info.setAttribute("txtvers", "1"); info.setAttribute("ch", "2"); info.setAttribute("cn", "1");
-            info.setAttribute("et", "1"); info.setAttribute("sv", "false"); info.setAttribute("da", "true");
-            info.setAttribute("sr", "44100"); info.setAttribute("ss", "16"); info.setAttribute("pw", "true");
-            info.setAttribute("vn", "3"); info.setAttribute("tp", "TCP,UDP"); info.setAttribute("vs", "130.14");
-            info.setAttribute("sm", "false"); info.setAttribute("ek", "1");
-            audioRegistration = new NsdManager.RegistrationListener() {
-                public void onServiceRegistered(NsdServiceInfo s) { runOnUiThread(() -> { if (active && receiverGeneration == generation) audioStatus.setText("Legacy audio receiver: " + s.getServiceName().substring(s.getServiceName().indexOf('@') + 1)); }); }
-                public void onRegistrationFailed(NsdServiceInfo s, int error) { runOnUiThread(() -> { if (active && receiverGeneration == generation) audioStatus.setText("Audio discovery failed (" + error + ")"); }); }
-                public void onServiceUnregistered(NsdServiceInfo s) { }
-                public void onUnregistrationFailed(NsdServiceInfo s, int error) { }
-            };
-            try { nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, audioRegistration); }
-            catch (RuntimeException e) { audioStatus.setText("Audio listener started, but discovery could not start"); }
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        }
-    }
-    private void startAudioReceiver() {
-        int generation = ++audioGeneration;
-        if (audioReceiver != null) { audioReceiver.close(); audioReceiver = null; }
-        if (!active || receiverPassword == null) return;
-        try {
-            audioReceiver = new NativeRaop(this, deviceId, receiverPassword, (playing, message) -> runOnUiThread(() -> {
-                if (!active || audioGeneration != generation) return;
-                if (playing) { player.stop(); player.clearMediaItems(); startFraction = 0; showHome(message); }
-                audioStatus.setText(message);
-            }));
-            audioStatus.setText("Legacy audio listener running • port " + audioReceiver.port());
-        } catch (java.io.IOException | LinkageError | RuntimeException e) {
-            audioStatus.setText("Legacy audio could not start. Check device support and port 5000.");
-        }
+        if(!active||receiverPassword==null)return;
+        passwordStatus.setText("Password protection is on • applies to audio and video");
+        final int generation=++receiverGeneration;
+        Playback playback=new Playback(){
+            private boolean current(){return active&&receiverGeneration==generation;}
+            private void ui(Runnable command){main.post(() -> {if(current())command.run();});}
+            public void onVideoFormat(VideoStreamInfo format){
+                if(!current())return;mirror.begin();
+                ui(() -> {player.stop();player.clearMediaItems();playerView.setVisibility(View.GONE);((View)home.getParent()).setVisibility(View.GONE);mirrorView.setVisibility(View.VISIBLE);mirrorView.requestFocus();});
+            }
+            public void onVideo(byte[] data){if(current())mirror.enqueue(data);}
+            public void onVideoSrcDisconnect(){if(current())mirror.stop();ui(() -> {if(mirrorView.getVisibility()==View.VISIBLE)showHome("Mirroring disconnected");});}
+            public void onAudioFormat(AudioStreamInfo format){if(current())airAudio.format(format);ui(() -> {player.stop();player.clearMediaItems();playbackStatus.setText("Audio session negotiated");});}
+            public void onAudio(byte[] bytes){if(current())airAudio.enqueue(bytes,0,bytes.length);}
+            public void onAudio(byte[] bytes,int offset,int length){if(current())airAudio.enqueue(bytes,offset,length);}
+            public void onAudioSrcDisconnect(){if(current())airAudio.stop();}
+            public void onPlaylist(String url){ui(() -> play(url,0));}
+            public void onPlaylistRemoved(){ui(() -> {player.stop();player.clearMediaItems();showHome("Video disconnected");});}
+            public void onPause(){ui(() -> player.pause());}
+            public void onResume(){ui(() -> player.play());}
+            public void onSeek(double seconds){ui(() -> player.seekTo((long)(seconds*1000)));}
+            public void onVolume(double volume){if(current())airAudio.volume(volume);ui(() -> player.setVolume((float)Math.max(0,Math.min(1,volume))));}
+            public Info info(){AirPlayServer.State snapshot=state;return new Info(snapshot.duration,snapshot.position,snapshot.playing?1:0);}
+            public void setObserver(Observer observer){if(current())playbackObserver=observer;}
+            public void onControlExchange(com.github.serezhka.airplay.server.ControlExchange event){
+                if(current()&&(event.method().equals("SETUP")||event.method().equals("RECORD")||event.method().equals("POST")))
+                    latestExchange=event.method()+" • response "+event.responseStatus();
+            }
+        };
+        audioStatus.setText("Video and audio share the receiver name “"+receiverName+"”");
+        controller.start(receiverName,deviceId,receiverPassword,playback);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
     private String addresses() {
         List<String> result = new ArrayList<>();
@@ -338,13 +340,13 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         return result.isEmpty() ? "No IPv4 network • connect Wi-Fi or Ethernet" : String.join(", ", result);
     }
     private void showHome(String message) {
-        ((View)home.getParent()).setVisibility(View.VISIBLE); playerView.setVisibility(View.GONE);
+        ((View)home.getParent()).setVisibility(View.VISIBLE); playerView.setVisibility(View.GONE); mirrorView.setVisibility(View.GONE);
         playbackStatus.setText(message); openButton.requestFocus();
     }
     @Override public void play(String url, double fraction) {
         runOnUiThread(() -> {
             if (!active) return;
-            startAudioReceiver();
+            mirror.stop();airAudio.stop();mirrorView.setVisibility(View.GONE);
             startFraction = fraction;
             player.setMediaItem(MediaItem.fromUri(url)); player.prepare(); player.play();
             ((View)home.getParent()).setVisibility(View.GONE); playerView.setVisibility(View.VISIBLE);
@@ -353,10 +355,10 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     }
     @Override public void pause(boolean paused) { runOnUiThread(() -> { if (active) { if (paused) player.pause(); else player.play(); } }); }
     @Override public void seek(double seconds) { runOnUiThread(() -> { if (active) player.seekTo((long)(seconds * 1000)); }); }
-    @Override public void stop() { runOnUiThread(() -> { if (active) { startAudioReceiver(); player.stop(); player.clearMediaItems(); startFraction = 0; showHome("Playback stopped"); } }); }
+    @Override public void stop() { runOnUiThread(() -> { if (active) { stopNetworkReceivers(); startReceivers(); player.stop(); player.clearMediaItems(); startFraction = 0; showHome("Playback stopped"); } }); }
     @Override public AirPlayServer.State state() { return state; }
     @Override public void onBackPressed() {
-        if (playerView.getVisibility() == View.VISIBLE) stop(); else super.onBackPressed();
+        if (playerView.getVisibility() == View.VISIBLE || mirrorView.getVisibility()==View.VISIBLE) stop(); else super.onBackPressed();
     }
     @Override protected void onStop() {
         active = false; main.removeCallbacks(refresh);
@@ -368,19 +370,14 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
         super.onStop();
     }
     private void stopNetworkReceivers() {
-        ++receiverGeneration;
-        ++audioGeneration;
-        if (audioRegistration != null && nsd != null) {
-            try { nsd.unregisterService(audioRegistration); } catch (IllegalArgumentException ignored) { }
-            audioRegistration = null;
-        }
-        if (audioReceiver != null) { audioReceiver.close(); audioReceiver = null; }
-        if (registration != null && nsd != null) {
-            try { nsd.unregisterService(registration); } catch (IllegalArgumentException ignored) { }
-            registration = null;
-        }
-        if (receiver != null) { receiver.close(); receiver = null; }
+        ++receiverGeneration;playbackObserver=Playback.Observer.NONE;latestExchange="No sender requests received";
+        if(controller!=null)controller.stop();
+        mirror.stop();airAudio.stop();
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
-    @Override protected void onDestroy() { playerView.setPlayer(null); player.release(); super.onDestroy(); }
+    @Override protected void onDestroy() {
+        if(networkCallback!=null)connectivity.unregisterNetworkCallback(networkCallback);
+        main.removeCallbacks(reconnect);controller.destroy();mirror.destroy();airAudio.destroy();
+        playerView.setPlayer(null);player.release();super.onDestroy();
+    }
 }

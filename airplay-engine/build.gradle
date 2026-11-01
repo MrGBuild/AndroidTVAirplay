@@ -1,0 +1,29 @@
+plugins { id 'java-library' }
+java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+sourceSets {
+    main {
+        java.srcDirs += ['../third_party/java-airplay/protocol/src/main/java', '../third_party/java-airplay/server/src/main/java']
+        resources.srcDirs += ['../third_party/java-airplay/protocol/src/main/resources']
+    }
+    test {
+        java.srcDirs += ['../third_party/java-airplay/protocol/src/test/java', '../third_party/java-airplay/server/src/test/java']
+        java.exclude '**/LayeringTest.java'
+        resources.srcDirs += ['../third_party/java-airplay/protocol/src/test/resources', '../third_party/java-airplay/server/src/test/resources']
+    }
+}
+dependencies {
+    implementation project(':receiver')
+    implementation 'com.googlecode.plist:dd-plist:1.30'
+    implementation 'net.i2p.crypto:eddsa:0.3.0'
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.86'
+    implementation 'org.jmdns:jmdns:3.6.1'
+    implementation 'org.slf4j:slf4j-api:2.0.16'
+    runtimeOnly 'org.slf4j:slf4j-nop:2.0.16'
+    implementation 'io.lindstrom:m3u8-parser:0.30'
+    implementation 'io.netty:netty-codec-http:4.1.118.Final'
+    implementation 'io.netty:netty-handler:4.1.118.Final'
+    compileOnly 'org.projectlombok:lombok:1.18.36'
+    annotationProcessor 'org.projectlombok:lombok:1.18.36'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+test { useJUnitPlatform(); testLogging { events 'failed', 'skipped' } }

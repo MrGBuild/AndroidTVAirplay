@@ -10,21 +10,24 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Legacy AirPlay Digest MD5, with a fresh unpredictable nonce per TCP connection. */
-final class DigestAuth {
-    private static final String REALM = "airplay";
+public final class DigestAuth {
+    private final String realm;
     private static final Pattern FIELD = Pattern.compile("\\s*([A-Za-z][A-Za-z0-9_-]*)\\s*=\\s*(?:\"([^\"\\r\\n]*)\"|([^,\\s]+))\\s*(?:,|$)");
     private final String password;
     private final String nonce;
 
-    DigestAuth(String password) {
+    public DigestAuth(String password) { this(password, "airplay"); }
+    public DigestAuth(String password, String realm) {
         if (password == null || password.isEmpty()) throw new IllegalArgumentException("A receiver password is required");
+        if (!"airplay".equals(realm) && !"raop".equals(realm)) throw new IllegalArgumentException("Unsupported realm");
+        this.realm = realm;
         this.password = password;
         byte[] random = new byte[16]; new SecureRandom().nextBytes(random);
         nonce = hex(random);
     }
-    String challenge() { return "Digest realm=\"" + REALM + "\", nonce=\"" + nonce + "\", algorithm=MD5"; }
+    public String challenge() { return "Digest realm=\"" + realm + "\", nonce=\"" + nonce + "\", algorithm=MD5"; }
 
-    boolean accepts(String authorization, String method, String target) {
+    public boolean accepts(String authorization, String method, String target) {
         if (authorization == null || !authorization.startsWith("Digest ")) return false;
         String fields = authorization.substring(7);
         Map<String,String> values = new HashMap<>();
@@ -39,10 +42,10 @@ final class DigestAuth {
         }
         String username = values.get("username"), response = values.get("response");
         if (username == null || response == null || !response.matches("[0-9a-fA-F]{32}")
-                || !REALM.equals(values.get("realm")) || !nonce.equals(values.get("nonce"))
+                || !realm.equals(values.get("realm")) || !nonce.equals(values.get("nonce"))
                 || !target.equals(values.get("uri")) || values.containsKey("qop")
                 || !"MD5".equalsIgnoreCase(values.getOrDefault("algorithm", "MD5"))) return false;
-        String ha1 = md5(username + ":" + REALM + ":" + password);
+        String ha1 = md5(username + ":" + realm + ":" + password);
         String ha2 = md5(method + ":" + target);
         byte[] expected = md5(ha1 + ":" + nonce + ":" + ha2).getBytes(StandardCharsets.US_ASCII);
         return MessageDigest.isEqual(expected, response.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII));

@@ -60,7 +60,7 @@ def main(password=None):
     library.raop_start.argtypes = [C.c_void_p, C.POINTER(C.c_ushort), C.c_char_p, C.c_int, C.c_char_p]
     library.raop_set_log_level.argtypes = [C.c_void_p, C.c_int]
     library.raop_destroy.argtypes = [C.c_void_p]
-    key_file = root / "app/src/main/assets/airport.key"
+    key_file = root / "tests/fixtures/airport-protocol.key"
     error, port = C.c_int(), C.c_ushort(0)
     raop = library.raop_init(1, C.byref(cb), key_file.read_bytes(), C.byref(error))
     assert raop, "native receiver initialization failed"

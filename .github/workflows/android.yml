@@ -13,11 +13,12 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v3
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'build-tools;34.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: |
           cmake -S app/src/main/cpp -B /tmp/tv-airplay-native
           cmake --build /tmp/tv-airplay-native --parallel 2
-          python3 tests/native_audio_smoke.py /tmp/tv-airplay-native/libshairplay.so
-      - run: ./gradlew :receiver:test :app:assembleDebug :app:lintDebug --no-daemon
+          python3 tests/native_alac_smoke.py /tmp/tv-airplay-native/libtvcodec.so
+      - run: ./gradlew :receiver:test :airplay-engine:test :app:assembleDebug :app:lintDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: tv-airplay-debug

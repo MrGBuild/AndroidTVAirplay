@@ -4,4 +4,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = 'AndroidTVAirplay'
-include ':app', ':receiver'
+include ':app', ':receiver', ':airplay-engine'
