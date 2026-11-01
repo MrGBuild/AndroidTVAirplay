@@ -20,6 +20,34 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 @androidx.media3.common.util.UnstableApi
 public class AndroidReceiverTest {
+    @Test public void passwordPinSrpAndLegacyGcmRunOnAndroid()throws Exception{
+        Playback sink=new Playback(){public void onVideoFormat(VideoStreamInfo i){}public void onVideo(byte[] b){}public void onVideoSrcDisconnect(){}public void onAudioFormat(AudioStreamInfo i){}public void onAudio(byte[] b){}public void onAudioSrcDisconnect(){}};
+        try(EngineReceiver receiver=new EngineReceiver("Android PIN Test","02:11:22:33:44:55","synthetic-password",new byte[32],sink)){
+            receiver.startWithoutDiscoveryForTest();
+            try(Socket socket=new Socket("127.0.0.1",receiver.port())){
+                socket.setSoTimeout(15000);
+                String fixture="62706c6973743030d201020304566d6574686f6454757365725370696e5f101041414242434344444545464630303131080d14191d0000000000000101000000000000000500000000000000000000000000000030";
+                byte[] body=new byte[fixture.length()/2];for(int i=0;i<body.length;i++)body[i]=(byte)Integer.parseInt(fixture.substring(2*i,2*i+2),16);
+                String base="POST /pair-setup-pin RTSP/1.0\r\nCSeq: 1\r\nContent-Length: "+body.length+"\r\n";
+                socket.getOutputStream().write((base+"\r\n").getBytes(StandardCharsets.US_ASCII));socket.getOutputStream().write(body);
+                String challenge=pinHeaders(socket.getInputStream());assertTrue(challenge.contains("401"));
+                var nonce=java.util.regex.Pattern.compile("nonce=\"([^\"]+)\"").matcher(challenge);assertTrue(nonce.find());
+                String response=pinMd5(pinMd5("AirPlay:raop:synthetic-password")+":"+nonce.group(1)+":"+pinMd5("POST:/pair-setup-pin"));
+                String auth="Authorization: Digest username=\"AirPlay\", realm=\"raop\", nonce=\""+nonce.group(1)+"\", uri=\"/pair-setup-pin\", response=\""+response+"\"\r\n";
+                socket.getOutputStream().write((base+auth+"\r\n").getBytes(StandardCharsets.US_ASCII));socket.getOutputStream().write(body);
+                String headers=pinHeaders(socket.getInputStream());assertTrue(headers,headers.contains("200 OK"));
+                var length=java.util.regex.Pattern.compile("(?i)Content-Length: (\\d+)").matcher(headers);assertTrue(length.find());int size=Integer.parseInt(length.group(1));assertTrue(size>256&&size<2048);
+                byte[] reply=new byte[size];int at=0;while(at<size){int n=socket.getInputStream().read(reply,at,size-at);assertTrue(n>0);at+=n;}
+                assertEquals("bplist00",new String(reply,0,8,StandardCharsets.US_ASCII));
+            }
+        }
+        // Legacy pairing uses a 16-byte GCM IV; check the Android provider explicitly.
+        var key=new javax.crypto.spec.SecretKeySpec(new byte[16],"AES");var params=new javax.crypto.spec.GCMParameterSpec(128,new byte[16]);
+        var enc=javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");enc.init(javax.crypto.Cipher.ENCRYPT_MODE,key,params);byte[] encrypted=enc.doFinal(new byte[32]);
+        var dec=javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");dec.init(javax.crypto.Cipher.DECRYPT_MODE,key,params);assertArrayEquals(new byte[32],dec.doFinal(encrypted));
+    }
+    private static String pinHeaders(InputStream in)throws Exception{ByteArrayOutputStream b=new ByteArrayOutputStream();while(!b.toString("US-ASCII").endsWith("\r\n\r\n")){int n=in.read();assertTrue(n>=0);b.write(n);assertTrue(b.size()<8192);}return b.toString("US-ASCII");}
+    private static String pinMd5(String text)throws Exception{StringBuilder s=new StringBuilder();for(byte b:java.security.MessageDigest.getInstance("MD5").digest(text.getBytes(StandardCharsets.UTF_8)))s.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return s.toString();}
     @Test public void foregroundAppAdvertisesTheSavedNameOnAndroidWifi()throws Exception{
         var instrumentation=InstrumentationRegistry.getInstrumentation();var context=instrumentation.getTargetContext();
         new PasswordStore(context).save("synthetic-instrumentation-password");

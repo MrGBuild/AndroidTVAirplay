@@ -34,7 +34,7 @@ final class ControlResponses {
     private final Supplier<byte[]> pendingRequestBody;
 
     DefaultFullHttpResponse createRtspResponse(FullHttpRequest request) {
-        var response = new DefaultFullHttpResponse(RtspVersions.RTSP_1_0, RtspResponseStatuses.OK);
+        var response = new DefaultFullHttpResponse(request.protocolVersion(), RtspResponseStatuses.OK);
         response.headers().clear();
 
         var cSeq = request.headers().get(RtspHeaderNames.CSEQ);

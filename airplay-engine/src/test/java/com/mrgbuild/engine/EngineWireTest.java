@@ -21,15 +21,18 @@ class EngineWireTest {
     }
     @AfterEach void close(){receiver.close();}
     static class Response {
-        int code;Map<String,String> headers=new HashMap<>();byte[] body;
+        int code;String protocol;Map<String,String> headers=new HashMap<>();byte[] body;
     }
     static class Wire implements AutoCloseable {
         final Socket socket;final InputStream in;final OutputStream out;int seq;
         Wire(int port)throws Exception {socket=new Socket("127.0.0.1",port);socket.setSoTimeout(4000);in=socket.getInputStream();out=socket.getOutputStream();}
         Response send(String method,String uri,byte[] body,String auth)throws Exception {
-            String head=method+" "+uri+" RTSP/1.0\r\nCSeq: "+(++seq)+"\r\nActive-Remote: test-session\r\nContent-Type: application/x-apple-binary-plist\r\nContent-Length: "+body.length+"\r\n"+(auth==null?"":"Authorization: "+auth+"\r\n")+"\r\n";
+            return send(method,uri,body,auth,"RTSP/1.0");
+        }
+        Response send(String method,String uri,byte[] body,String auth,String protocol)throws Exception {
+            String head=method+" "+uri+" "+protocol+"\r\nCSeq: "+(++seq)+"\r\nActive-Remote: test-session\r\nContent-Type: application/x-apple-binary-plist\r\nContent-Length: "+body.length+"\r\n"+(auth==null?"":"Authorization: "+auth+"\r\n")+"\r\n";
             out.write(head.getBytes(StandardCharsets.US_ASCII));out.write(body);out.flush();
-            String status=line();assertNotNull(status);Response r=new Response();r.code=Integer.parseInt(status.split(" ")[1]);
+            String status=line();assertNotNull(status);Response r=new Response();r.protocol=status.split(" ")[0];r.code=Integer.parseInt(status.split(" ")[1]);
             for(String h;(h=line())!=null&&!h.isEmpty();){int at=h.indexOf(':');r.headers.put(h.substring(0,at).toLowerCase(Locale.ROOT),h.substring(at+1).trim());}
             int length=Integer.parseInt(r.headers.getOrDefault("content-length","0"));assertTrue(length>=0&&length<=2*1024*1024);r.body=in.readNBytes(length);assertEquals(length,r.body.length);return r;
         }

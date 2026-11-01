@@ -16,3 +16,9 @@ checks are supplied by the app. Diagnostic payload dumping is not enabled.
 0.4.1 adds app-owned connection tracing before password gating and a sanitized
 terminal exception handler. Mirroring SETUP responses retain the same live UDP
 timing port as initial SETUP instead of returning zero.
+
+0.4.2 wires the app-owned legacy PIN pairing handler after Digest authentication.
+SRP-6a uses the existing permissive Bouncy Castle dependency. No GPL pairing
+library or source was added.
+The control dispatcher accepts legacy HTTP pair-setup/pair-verify in addition
+to RTSP, preserving the incoming protocol version in each response.

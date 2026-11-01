@@ -7,8 +7,8 @@ android {
         applicationId 'com.mrgbuild.tvairplay'
         minSdk 26
         targetSdk 35
-        versionCode 5
-        versionName '0.4.1'
+        versionCode 6
+        versionName '0.4.2'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
         externalNativeBuild { cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'; cFlags '-O2' } }

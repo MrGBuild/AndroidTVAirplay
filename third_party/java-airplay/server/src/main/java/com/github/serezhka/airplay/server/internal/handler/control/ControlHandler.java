@@ -125,7 +125,15 @@ public class ControlHandler extends ChannelInboundHandlerAdapter {
                 }
             } else if (HttpVersion.HTTP_1_1.equals(request.protocolVersion())) {
                 var decoder = new QueryStringDecoder(request.uri());
-                if (HttpMethod.GET.equals(request.method()) && decoder.path().equals("/server-info")) {
+                if (HttpMethod.POST.equals(request.method()) && decoder.path().equals("/pair-setup")) {
+                    handlePairSetup(ctx, request);
+                } else if (HttpMethod.POST.equals(request.method()) && decoder.path().equals("/pair-verify")) {
+                    handlePairVerify(ctx, request);
+                } else if (HttpMethod.GET.equals(request.method()) && decoder.path().equals("/info")) {
+                    handleGetInfo(ctx, request);
+                } else if (HttpMethod.OPTIONS.equals(request.method())) {
+                    handleRtspOptions(ctx, request);
+                } else if (HttpMethod.GET.equals(request.method()) && decoder.path().equals("/server-info")) {
                     handleGetServerInfo(ctx, request);
                 } else if (HttpMethod.POST.equals(request.method())
                         && (decoder.path().equals("/fp-setup") || decoder.path().equals("/fp-setup2"))) {

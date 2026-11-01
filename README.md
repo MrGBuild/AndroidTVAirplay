@@ -1,4 +1,4 @@
-# TV AirPlay — receiver rebuild 0.4.1
+# TV AirPlay — receiver rebuild 0.4.2
 
 Android TV / Chromecast with Google TV receiver. The app layer remains privately
 licensed; its third-party components have their own licenses. Versions 0.1–0.3
@@ -22,13 +22,24 @@ The development APK is debug-signed; its SHA-256 is in `downloads/TV-AirPlay-deb
 5. If absent, select **Restart discovery**, then **Connection diagnostics**, and
    report the displayed status and which phone app/menu was used.
 
+Version 0.4.2 implements the legacy `/pair-pin-start` and `/pair-setup-pin` exchange
+requested by the reported iPhone. Both endpoints remain password gated. SRP-6a
+proofs and authenticated AES-GCM key exchange replace the previous 404 response;
+the saved receiver password is used for pairing, with no separate generated PIN.
+HTTP pairing can continue through `/pair-verify` with matching HTTP responses,
+as well as the existing RTSP path.
+This is legacy AirPlay pairing, not HomeKit pairing. An independent Python client
+checks HTTP/RTSP proofs, receiver identity and incorrect-password rejection
+(`tests/legacy_pin_interop.py`, test-only dependencies `srptools`, `cryptography`).
+It connects to the synthetic `PinInteropHost` test fixture, never a user's receiver.
+Physical iPhone/TV acceptance still needs retesting after this update.
+
 Version 0.4.1 preserves the live UDP timing port in the mirroring SETUP response
 and adds a bounded, memory-only connection history. It includes TCP connections,
 early info probes, password challenges, response codes and protocol failures.
 The old "Last sender event" field omitted early requests and was misleading.
 History omits addresses, credentials, headers, bodies and media URLs. Reproduce
 the failure before opening diagnostics; restarting the receiver clears history.
-This update has not yet been verified against the reported physical iPhone/TV failure.
 
 The first 0.4 launch changes the discovery identity once to avoid cached legacy
 capabilities. The new pairing identity is then kept encrypted locally. The chosen
