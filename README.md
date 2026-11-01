@@ -1,4 +1,4 @@
-# TV AirPlay — receiver rebuild 0.4.3
+# TV AirPlay — receiver rebuild 0.4.4
 
 Android TV / Chromecast with Google TV receiver. The app layer remains privately
 licensed; its third-party components have their own licenses. Versions 0.1–0.3
@@ -21,6 +21,13 @@ The development APK is debug-signed; its SHA-256 is in `downloads/TV-AirPlay-deb
    physical iPhone-to-TV interoperability still needs testing.
 5. If absent, select **Restart discovery**, then **Connection diagnostics**, and
    report the displayed status and which phone app/menu was used.
+
+Version 0.4.4 fits mirroring to the decoded picture's aspect ratio, including
+H.264 crop and sample aspect ratio. Portrait is centered with black side bars;
+landscape uses the largest undistorted image that fits the TV. Rotation updates
+the surface layout automatically. A wider-than-TV phone picture may retain small
+top/bottom bars to avoid cropping. The user has confirmed physical iPhone video
+mirroring on the preceding release; physical audio remains unconfirmed.
 
 Version 0.4.3 removes an unnecessary character restriction on SRP identities.
 Bounded string and binary identities are preserved exactly for password proofs,

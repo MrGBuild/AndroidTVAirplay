@@ -20,6 +20,22 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 @androidx.media3.common.util.UnstableApi
 public class AndroidReceiverTest {
+    @Test public void mirrorFitsPortraitAndRotatesToLandscapeWithoutStretching()throws Exception{
+        var instrumentation=InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            android.widget.FrameLayout root=new android.widget.FrameLayout(instrumentation.getTargetContext());
+            MirrorSurfaceView view=new MirrorSurfaceView(instrumentation.getTargetContext());
+            root.addView(view,new android.widget.FrameLayout.LayoutParams(-1,-1,android.view.Gravity.CENTER));
+            int width=android.view.View.MeasureSpec.makeMeasureSpec(1920,android.view.View.MeasureSpec.EXACTLY);
+            int height=android.view.View.MeasureSpec.makeMeasureSpec(1080,android.view.View.MeasureSpec.EXACTLY);
+            view.setVideoAspectRatio(9f/16);root.measure(width,height);root.layout(0,0,1920,1080);
+            assertEquals(608,view.getWidth());assertEquals(1080,view.getHeight());assertEquals(656,view.getLeft());
+            view.setVideoAspectRatio(16f/9);root.measure(width,height);root.layout(0,0,1920,1080);
+            assertEquals(1920,view.getWidth());assertEquals(1080,view.getHeight());assertEquals(0,view.getLeft());
+            view.setVideoAspectRatio(19.5f/9);root.measure(width,height);root.layout(0,0,1920,1080);
+            assertEquals(1920,view.getWidth());assertEquals(886,view.getHeight());assertEquals(97,view.getTop());
+        });
+    }
     @Test public void passwordPinSrpAndLegacyGcmRunOnAndroid()throws Exception{
         Playback sink=new Playback(){public void onVideoFormat(VideoStreamInfo i){}public void onVideo(byte[] b){}public void onVideoSrcDisconnect(){}public void onAudioFormat(AudioStreamInfo i){}public void onAudio(byte[] b){}public void onAudioSrcDisconnect(){}};
         try(EngineReceiver receiver=new EngineReceiver("Android PIN Test","02:11:22:33:44:55","synthetic-password",new byte[32],sink)){
@@ -105,7 +121,8 @@ public class AndroidReceiverTest {
     }
     @Test public void h264MirrorDecodesARealFrameToAndroidSurface()throws Exception{
         CountDownLatch picture=new CountDownLatch(1);List<String> messages=new CopyOnWriteArrayList<>();
-        MirrorVideoPlayer player=new MirrorVideoPlayer(s -> {messages.add(s);if(s.equals("Mirroring picture received"))picture.countDown();});
+        java.util.concurrent.atomic.AtomicReference<Float> aspect=new java.util.concurrent.atomic.AtomicReference<>(0f);
+        MirrorVideoPlayer player=new MirrorVideoPlayer(s -> {messages.add(s);if(s.equals("Mirroring picture received"))picture.countDown();},aspect::set);
         var instrumentation=InstrumentationRegistry.getInstrumentation();
         var context=instrumentation.getTargetContext();
         CodecTestActivity activity=(CodecTestActivity)instrumentation.startActivitySync(new android.content.Intent(context,CodecTestActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -130,6 +147,7 @@ public class AndroidReceiverTest {
             }
             player.enqueue(Arrays.copyOfRange(stream,previous,stream.length));
             boolean decoded=picture.await(25,TimeUnit.SECONDS);assertTrue(messages+"; decoder="+player.diagnostics(),decoded);
+            assertEquals(320f/180,aspect.get(),0.0001f);
         }finally{player.destroy();instrumentation.runOnMainSync(activity::finish);}
 
     }

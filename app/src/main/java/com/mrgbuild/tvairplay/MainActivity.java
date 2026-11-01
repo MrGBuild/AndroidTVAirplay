@@ -7,7 +7,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.LinkProperties;
-import android.view.SurfaceView;
 import android.view.SurfaceHolder;
 import com.github.serezhka.airplay.server.Playback;
 import com.github.serezhka.airplay.protocol.media.AudioStreamInfo;
@@ -40,7 +39,7 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
     private ReceiverController controller;
     private MirrorVideoPlayer mirror;
     private AirPlayAudioPlayer airAudio;
-    private SurfaceView mirrorView;
+    private MirrorSurfaceView mirrorView;
     private ConnectivityManager connectivity;
     private ConnectivityManager.NetworkCallback networkCallback;
     private volatile Playback.Observer playbackObserver=Playback.Observer.NONE;
@@ -73,18 +72,18 @@ public class MainActivity extends Activity implements AirPlayServer.Playback {
             return spec;
         });
         player = new ExoPlayer.Builder(this).setMediaSourceFactory(new androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSources)).setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT,true).build();
-        mirror=new MirrorVideoPlayer(message -> runOnUiThread(() -> {if(active)playbackStatus.setText(message);}));
+        mirror=new MirrorVideoPlayer(message -> runOnUiThread(() -> {if(active)playbackStatus.setText(message);}),ratio -> runOnUiThread(() -> {if(active&&mirrorView!=null)mirrorView.setVideoAspectRatio(ratio);}));
         airAudio=new AirPlayAudioPlayer(message -> runOnUiThread(() -> {if(active)playbackStatus.setText(message);}));
         controller=new ReceiverController(this,message -> runOnUiThread(() -> {if(active){status.setText(message);endpoint.setText("Open Connection diagnostics for network details");}}));
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(INK);
-        mirrorView=new SurfaceView(this);mirrorView.setTag("mirror-output");mirrorView.setVisibility(View.GONE);
+        root.setBackgroundColor(android.graphics.Color.BLACK);
+        mirrorView=new MirrorSurfaceView(this);mirrorView.setTag("mirror-output");mirrorView.setVisibility(View.GONE);
         mirrorView.getHolder().addCallback(new SurfaceHolder.Callback(){
             public void surfaceCreated(SurfaceHolder holder){mirror.surface(holder.getSurface());}
             public void surfaceChanged(SurfaceHolder holder,int format,int width,int height){mirror.surface(holder.getSurface());}
             public void surfaceDestroyed(SurfaceHolder holder){mirror.surface(null);}
         });
-        root.addView(mirrorView,new FrameLayout.LayoutParams(-1,-1));
+        root.addView(mirrorView,new FrameLayout.LayoutParams(-1,-1,android.view.Gravity.CENTER));
         playerView = new PlayerView(this);
         playerView.setPlayer(player);
         playerView.setVisibility(View.GONE);
