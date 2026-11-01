@@ -1,4 +1,4 @@
-# TV AirPlay — receiver rebuild 0.4.2
+# TV AirPlay — receiver rebuild 0.4.3
 
 Android TV / Chromecast with Google TV receiver. The app layer remains privately
 licensed; its third-party components have their own licenses. Versions 0.1–0.3
@@ -21,6 +21,13 @@ The development APK is debug-signed; its SHA-256 is in `downloads/TV-AirPlay-deb
    physical iPhone-to-TV interoperability still needs testing.
 5. If absent, select **Restart discovery**, then **Connection diagnostics**, and
    report the displayed status and which phone app/menu was used.
+
+Version 0.4.3 removes an unnecessary character restriction on SRP identities.
+Bounded string and binary identities are preserved exactly for password proofs,
+including punctuation and Unicode. Rejected pairing requests now leave a local,
+sanitized reason in connection history. The reported first-request 400 does not
+include enough information to confirm its cause; this update fixes a known
+rejection case and makes remaining failures diagnosable without exposing payloads.
 
 Version 0.4.2 implements the legacy `/pair-pin-start` and `/pair-setup-pin` exchange
 requested by the reported iPhone. Both endpoints remain password gated. SRP-6a

@@ -112,7 +112,7 @@ public class ControlServer implements Runnable {
                                     new HttpObjectAggregator(2 * 1024 * 1024),
                                     new com.mrgbuild.engine.ControlTrace(diagnostics, connectionIds.incrementAndGet()),
                                     new com.mrgbuild.engine.PasswordGate(airPlayConfig.getPassword(),airPlayConfig.getPlaybackToken()),
-                                    new com.mrgbuild.engine.PinPairingHandler(airPlayConfig.getPassword(),sessionManager.pairingPublicKey()),
+                                    new com.mrgbuild.engine.PinPairingHandler(airPlayConfig.getPassword(),sessionManager.pairingPublicKey(),diagnostics),
                                     new ControlHandler(sessionManager, hlsFcupService, airPlayConfig, airPlayConsumer),
                                     new io.netty.channel.ChannelInboundHandlerAdapter() {
                                         @Override public void exceptionCaught(io.netty.channel.ChannelHandlerContext ctx, Throwable cause) {

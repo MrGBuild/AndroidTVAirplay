@@ -30,10 +30,14 @@ final class LegacyPinPairing {
     NSDictionary exchange(NSDictionary request) throws Exception {
         if (request.containsKey("method")) {
             reset();
-            if (!"pin".equals(request.objectForKey("method").toString())) throw new IllegalArgumentException();
+            if (!"pin".equals(request.objectForKey("method").toString())) throw new RequestError("unsupported method");
             NSObject username=request.objectForKey("user");
-            if (!(username instanceof NSString) || !username.toString().matches("[A-Za-z0-9-]{1,64}")) throw new IllegalArgumentException();
-            user=username.toString().getBytes(StandardCharsets.UTF_8);
+            // SRP identities are opaque byte strings, not receiver names or account names.
+            // Preserve punctuation, Unicode and binary identities exactly; do not normalize.
+            if (username instanceof NSString text) user=text.getContent().getBytes(StandardCharsets.UTF_8);
+            else if (username instanceof NSData bytes) user=bytes.bytes().clone();
+            else throw new RequestError("unsupported identity type");
+            if(user.length==0||user.length>256)throw new RequestError("identity length outside limits");
             salt=new byte[16];new SecureRandom().nextBytes(salt);
             SRP6VerifierGenerator verifier=new SRP6VerifierGenerator();verifier.init(N,G,new SHA1Digest());
             BigInteger v=verifier.generateVerifier(salt,user,password.getBytes(StandardCharsets.UTF_8));
@@ -42,7 +46,7 @@ final class LegacyPinPairing {
             expires=System.nanoTime()+60_000_000_000L;step=1;
             NSDictionary response=new NSDictionary();response.put("pk",serverPublic);response.put("salt",salt);return response;
         }
-        if (step==0 || System.nanoTime()>expires) {reset();throw new IllegalStateException();}
+        if (step==0 || System.nanoTime()>expires) {reset();throw new RequestError("missing or expired exchange");}
         if (step==1) {
             byte[] clientPublic=data(request,"pk",1,256), proof=data(request,"proof",20,20);
             BigInteger a=new BigInteger(1,clientPublic);
@@ -72,6 +76,9 @@ final class LegacyPinPairing {
         } finally {Arrays.fill(key,(byte)0);reset();}
     }
     void reset(){if(sessionKey!=null)Arrays.fill(sessionKey,(byte)0);sessionKey=null;srp=null;step=0;}
+    static final class RequestError extends IllegalArgumentException {
+        RequestError(String reason){super(reason);}
+    }
     private static byte[] data(NSDictionary d,String field,int min,int max){
         if(!(d.objectForKey(field) instanceof NSData value)||value.length()<min||value.length()>max)throw new IllegalArgumentException();return value.bytes();
     }

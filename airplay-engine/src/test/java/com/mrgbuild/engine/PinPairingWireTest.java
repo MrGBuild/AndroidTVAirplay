@@ -25,13 +25,16 @@ class PinPairingWireTest {
     static class Client {
         byte[] key,proof,publicKey;
         Client(NSDictionary reply,String password)throws Exception{
+            this(reply,password,"AABBCCDDEEFF0011".getBytes(StandardCharsets.UTF_8));
+        }
+        Client(NSDictionary reply,String password,byte[] identity)throws Exception{
             var group=SRP6StandardGroups.rfc5054_2048;
             SRP6Client client=new SRP6Client();client.init(group,new SHA1Digest(),new SecureRandom());
-            publicKey=bytes(client.generateClientCredentials(data(reply,"salt"),"AABBCCDDEEFF0011".getBytes(StandardCharsets.UTF_8),password.getBytes(StandardCharsets.UTF_8)));
+            publicKey=bytes(client.generateClientCredentials(data(reply,"salt"),identity,password.getBytes(StandardCharsets.UTF_8)));
             byte[] s=bytes(client.calculateSecret(new BigInteger(1,data(reply,"pk"))));
             byte[] k1=hash("SHA-1",s,new byte[4]),k2=hash("SHA-1",s,new byte[]{0,0,0,1});key=new byte[40];System.arraycopy(k1,0,key,0,20);System.arraycopy(k2,0,key,20,20);
             byte[] xor=bytes(new BigInteger(1,hash("SHA-1",bytes(group.getN()))).xor(new BigInteger(1,hash("SHA-1",bytes(group.getG())))));
-            proof=hash("SHA-1",xor,bytes(new BigInteger(1,hash("SHA-1","AABBCCDDEEFF0011".getBytes(StandardCharsets.UTF_8)))),data(reply,"salt"),publicKey,bytes(new BigInteger(1,data(reply,"pk"))),key);
+            proof=hash("SHA-1",xor,bytes(new BigInteger(1,hash("SHA-1",identity))),data(reply,"salt"),publicKey,bytes(new BigInteger(1,data(reply,"pk"))),key);
         }
         NSDictionary proof(){NSDictionary d=new NSDictionary();d.put("pk",publicKey);d.put("proof",proof);return d;}
         byte[] aesKey()throws Exception{return Arrays.copyOf(hash("SHA-512","Pair-Setup-AES-Key".getBytes(StandardCharsets.UTF_8),key),16);}
@@ -77,6 +80,28 @@ class PinPairingWireTest {
             var setup=wire.send("POST","/pair-setup",new byte[0],null,"HTTP/1.1");assertEquals(200,setup.code);assertEquals("HTTP/1.1",setup.protocol);assertEquals(32,setup.body.length);
             byte[] body=new byte[68];body[0]=1;Arrays.fill(body,4,36,(byte)9);Arrays.fill(body,36,68,(byte)1);
             var verify=wire.send("POST","/pair-verify",body,null,"HTTP/1.1");assertEquals(200,verify.code);assertEquals("HTTP/1.1",verify.protocol);assertEquals(96,verify.body.length);
+        }
+    }
+    @Test void opaqueTextAndBinaryIdentitiesRetainTheirExactSrpBytes()throws Exception{
+        for(Object identity:new Object[]{"phone:test_id@network!?","Téléphone: test",new byte[]{0,1,(byte)255,':','_'}}){
+            byte[] raw=identity instanceof byte[] bytes?bytes:identity.toString().getBytes(StandardCharsets.UTF_8);
+            try(Wire wire=new Wire(host.receiver.port())){
+                NSDictionary request=begin();request.put("user",identity);
+                var challenge=post(wire,request,null);assertEquals(401,challenge.code);
+                var first=parse(post(wire,request,auth(challenge,"POST","/pair-setup-pin",PASSWORD)));
+                Client client=new Client(first,PASSWORD,raw);
+                var proof=parse(post(wire,client.proof(),null));
+                assertArrayEquals(hash("SHA-1",client.publicKey,client.proof,client.key),data(proof,"proof"));
+            }
+        }
+    }
+    @Test void malformedIdentityReportsSafeReasonWithoutLeakingItsValue()throws Exception{
+        try(Wire wire=new Wire(host.receiver.port())){
+            NSDictionary request=begin();request.put("user",new byte[257]);
+            var challenge=post(wire,request,null);
+            assertEquals(400,post(wire,request,auth(challenge,"POST","/pair-setup-pin",PASSWORD)).code);
+            assertTrue(host.receiver.connectionDiagnostics().contains("PIN rejected: identity length outside limits"));
+            assertFalse(host.receiver.connectionDiagnostics().contains(PASSWORD));
         }
     }
 }
